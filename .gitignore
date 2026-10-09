@@ -1,0 +1,98 @@
+# Build artifacts
+build/
+# Variant builds, e.g. build_abi/ for -DRECOMP_ABI_CHECK. Deliberately not
+# kept between sessions: a variant goes stale the moment a toolkit fix lands,
+# and a stale binary you believe is current costs more than rebuilding it.
+build_*/
+out/
+bin/
+*.obj
+*.o
+*.lib
+*.a
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.exp
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Visual Studio
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+Debug/
+Release/
+x64/
+
+# Generated recompiled code (regenerate from XBE with the recomp pipeline)
+src/recomp/gen/
+
+# Game files (user must provide their own legally-owned copies)
+game/
+game_files/
+*.xbe
+*.iso
+*.xiso
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Journaux d'essais et captures (essai.sh, run.ps1, F10, RECOMP_FB_SNAP)
+*.txt
+!CMakeLists.txt
+*.log
+*.bmp
+captures/
+/y1
+/y2
+
+# Releve d'appels indirects du dernier essai (reecrit a chaque execution)
+icall_targets.dump
+
+# Modeles, textures et apercus tires du jeu (outils/viv_extract.py, o_to_obj.py,
+# xsh_to_png.py). Ce sont les donnees du jeu : elles se regenerent en trois
+# commandes depuis game_files/ et ne se diffusent jamais.
+modeles/
+travail/
+
+# Le contenu de la demo PS2 (JamPack) : des donnees de jeu, comme game_files/
+ps2_demo/
+
+# Cache de l'interpreteur, cree des qu'un outil en importe un autre
+__pycache__/
+
+# Le visionneur : les modeles exportes sont regeneres par o_to_gltf.py
+outils/visionneur/*.glb
+outils/visionneur/*.glb.txt
+
+# Reglages du lanceur, propres a chaque joueur, et le journal de la partie precedente (point 141)
+defjam.ini
+run_stderr_precedent.txt
+
+# Le paquet public fabrique par paquet/fabriquer_paquet.ps1 (point 143)
+paquet/sortie/
+!paquet/README.txt
+
+# Les outils embarques du paquet complet et leurs archives (point 145)
+paquet/outils/
+paquet/telechargements/
+
+# Les SDK de tiers (Streamline de NVIDIA, point 155) : sous leurs propres licences,
+# telecharges a part, jamais commites
+tiers/

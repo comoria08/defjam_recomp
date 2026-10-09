@@ -1,0 +1,34 @@
+[
+ {
+  "start": "0x001141A0",
+  "source": "observed-unresolved (tm7, call site 0x00109F54)"
+ },
+ {
+  "start": "0x000297E0",
+  "source": "observed-unresolved (tm10, call site 0x001DEC94, movie phase)"
+ },
+ {
+  "start": "0x001BD990",
+  "source": "fight state table built in sub_001B54D0, called at 0x001B5A38"
+ },
+ {
+  "start": "0x001CA380",
+  "source": "fight state table built in sub_001B54D0, called at 0x001B5A38"
+ },
+ {
+  "start": "0x001D7250",
+  "source": "fight state table built in sub_001B54D0, called at 0x001B5A38"
+ },
+ {
+  "start": "0x001DACE0",
+  "source": "fight state table built in sub_001B54D0, called at 0x001B5A38"
+ },
+ {
+  "start": "0x001D83B0",
+  "source": "fight state table built in sub_001B54D0 (entries 12 and 13), called at 0x001B5A38: the subway tracks -- a fighter thrown onto them, or stepping down, then climbing back (point 94)"
+ },
+ {
+  "start": "0x000B4E90",
+  "source": "observed-unresolved (point 94, call site 0x000BD778 returning to 0x000BD77A, end of a subway fight): referenced only by immediates at 0x000B5203 and 0x000B5CAE"
+ }
+]

@@ -1,0 +1,2 @@
+# Scripts bash : toujours LF, sinon Git Bash lit des \r en fin de ligne
+*.sh text eol=lf
