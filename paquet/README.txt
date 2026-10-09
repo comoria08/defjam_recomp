@@ -31,6 +31,9 @@ WHAT YOU NEED
   The light package needs Visual Studio Build Tools (C++), Python 3 with the
   capstone module, and CMake; if some are missing, the installer offers to
   install them with winget, only if you agree.
+- DLSS (light package only, NVIDIA RTX card): the installer offers to
+  download NVIDIA Streamline 2.14.1 (276 MB) from NVIDIA's official GitHub
+  and checks it. It is never included: NVIDIA's licence forbids it.
 
 
 INSTALL
@@ -107,6 +110,10 @@ IL VOUS FAUT
   à installer. Le paquet léger demande Visual Studio Build Tools (C++),
   Python 3 avec le module capstone, et CMake ; s'il en manque, l'installeur
   propose de les installer avec winget, seulement si vous acceptez.
+- DLSS (paquet léger seulement, carte NVIDIA RTX) : l'installeur propose de
+  télécharger NVIDIA Streamline 2.14.1 (276 Mo) depuis le GitHub officiel de
+  NVIDIA, et le vérifie. Il n'est jamais fourni : la licence de NVIDIA
+  l'interdit.
 
 
 INSTALLER

@@ -31,6 +31,10 @@
 # -Outils     les outils embarques du paquet complet (defaut : ..\outils a cote
 #             du projet). S'ils sont la -- Clang (llvm-mingw), Python et CMake --
 #             ils servent a tout et rien n'est a installer (point 145).
+# -SansDLSS   ne propose pas le DLSS. Sinon, avec Visual Studio et une carte
+#             NVIDIA RTX, l'installeur propose de telecharger Streamline (le SDK
+#             de NVIDIA qui porte le DLSS) depuis son depot officiel, dans
+#             tiers\streamline : il n'est jamais distribue avec le portage (point 160).
 # Tout est ecrit dans <Projet>\installation.log.
 param(
     [string]$Iso = "",
@@ -41,7 +45,8 @@ param(
     [Alias("Yes")][switch]$Oui,
     [Alias("Shortcut")][string]$Raccourci = "",
     [Alias("Language")][string]$Langue = "",
-    [Alias("Tools")][string]$Outils = ""
+    [Alias("Tools")][string]$Outils = "",
+    [Alias("NoDLSS")][switch]$SansDLSS
 )
 
 # "Continue" et non "Stop" : Windows PowerShell 5.1 fait une erreur de chaque
@@ -330,11 +335,65 @@ $n = (Get-ChildItem $Gen -Filter "recomp_0*.c").Count
 Ecrire ((L "  $n fichiers de C générés dans src\recomp\gen" "  $n C files generated in src\recomp\gen")) "Green"
 
 # ── 5. La compilation ──────────────────────────────────────────────────
+
+# Le DLSS passe par Streamline (point 155), que la licence de NVIDIA ne laisse
+# pas distribuer a part : on le prend a sa source, la release officielle, et
+# on n'en garde que ce que la compilation et le jeu chargent. Le CMakeLists le
+# trouve tout seul dans tiers\streamline. Seulement avec Visual Studio : ses
+# en-tetes sont du C++ que la chaine Clang du paquet complet ne compile pas.
+$SlVersion = "2.14.1"
+$SlZip     = "streamline-sdk-v$SlVersion.zip"
+$SlUrl     = "https://github.com/NVIDIA-RTX/Streamline/releases/download/v$SlVersion/$SlZip"
+$SlSha256  = "92C4D954631A1710DA86CA3FA8D5034F2B9503838C95FC4AE977AE149319781B"
+function Preparer-DLSS {
+    $dest = Join-Path $Projet "tiers\streamline"
+    if (Test-Path (Join-Path $dest "include\sl.h")) { Ecrire "  DLSS : $dest"; return }
+    $rtx = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'NVIDIA.*RTX' })
+    if (-not $rtx.Count) { Ecrire (L "  DLSS : pas de carte NVIDIA RTX, compilé sans" "  DLSS: no NVIDIA RTX card, built without"); return }
+    $ok = [bool]$Oui
+    if (-not $ok) {
+        Ecrire ((L "`nCarte $($rtx[0].Name) : télécharger le DLSS (NVIDIA Streamline $SlVersion, 276 Mo, depuis github.com/NVIDIA-RTX) ? Sa licence sera acceptée en votre nom." `
+                   "`nCard $($rtx[0].Name): download DLSS (NVIDIA Streamline $SlVersion, 276 MB, from github.com/NVIDIA-RTX)? Its licence will be accepted on your behalf.")) "White"
+        $r = Read-Host (L "[O]ui / [N]on" "[Y]es / [N]o")
+        Add-Content -Path $Log -Value "  > $r" -Encoding UTF8
+        $ok = $r -match '^\s*[oOyY]'
+    }
+    if (-not $ok) { Ecrire (L "  DLSS : refusé, compilé sans" "  DLSS: declined, built without"); return }
+    $tmp = Join-Path $Pipe "streamline"
+    if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+    New-Item -ItemType Directory -Force $tmp | Out-Null
+    $zip = Join-Path $tmp $SlZip
+    Ecrire (L "  téléchargement de $SlUrl" "  downloading $SlUrl")
+    & curl.exe -sSL --fail -o $zip $SlUrl
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $zip)) { Ecrire (L "  DLSS : téléchargement échoué, compilé sans" "  DLSS: download failed, built without") "Yellow"; return }
+    $h = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToUpper()
+    if ($h -ne $SlSha256) { Remove-Item $zip; Ecrire (L "  DLSS : archive inattendue ($h), compilé sans" "  DLSS: unexpected archive ($h), built without") "Yellow"; return }
+    # Le tar de Windows lit les zip ; seulement les fichiers utiles, pas les 1 Go du SDK.
+    $x = Join-Path $tmp "x"
+    New-Item -ItemType Directory -Force $x | Out-Null
+    & "$env:SystemRoot\System32\tar.exe" -x -f $zip -C $x "*include/*" "*lib/x64/sl.interposer.lib" "*bin/x64/sl.interposer.dll" `
+        "*bin/x64/sl.common.dll" "*bin/x64/sl.dlss.dll" "*bin/x64/nvngx_dlss.dll" "*bin/x64/nvngx_dlss.license.txt" "*license.txt" 2>$null
+    $slh = Get-ChildItem $x -Recurse -Filter "sl.h" | Where-Object { $_.Directory.Name -eq "include" } | Select-Object -First 1
+    if (-not $slh) { Ecrire (L "  DLSS : archive illisible, compilé sans" "  DLSS: unreadable archive, built without") "Yellow"; return }
+    $racine = $slh.Directory.Parent.FullName
+    New-Item -ItemType Directory -Force $dest | Out-Null
+    foreach ($d in @("include", "lib", "bin", "license.txt")) {
+        $p = Join-Path $racine $d
+        if (Test-Path $p) { Copy-Item -Recurse -Force $p $dest }
+    }
+    Remove-Item -Recurse -Force $tmp
+    if (-not (Test-Path (Join-Path $dest "bin\x64\nvngx_dlss.dll"))) {
+        Remove-Item -Recurse -Force $dest
+        Ecrire (L "  DLSS : nvngx_dlss.dll absent de l'archive, compilé sans" "  DLSS: nvngx_dlss.dll missing from the archive, built without") "Yellow"; return
+    }
+    Ecrire "  DLSS : $dest" "Green"
+}
 $exe = Join-Path $Projet "build\Release\defjam_recomp.exe"
 if ($SansCompilation) {
     Ecrire (L "`nCompilation sautée (-SansCompilation)." "`nBuild skipped (-NoBuild).") "Yellow"
 } else {
     Etape 5 (L "Compilation (quelques minutes)" "Build (a few minutes)")
+    if (-not $Embarque -and -not $SansDLSS) { Preparer-DLSS }
     $build = Join-Path $Projet "build"
     # Un build\ configure pour l'autre compilateur ne se reconfigure pas : CMake
     # refuse de changer de generateur. On le recommence.
