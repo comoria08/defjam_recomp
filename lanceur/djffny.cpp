@@ -1067,7 +1067,8 @@ static void servir(ICoreWebView2WebResourceRequestedEventArgs *args)
     else if (chemin == L"mod_defaut.jpg") { ressource(L"MOD_DEFAUT", &d, &n); type = L"image/jpeg"; }
     else if (chemin == L"aucun_mod.png") { ressource(L"AUCUN_MOD", &d, &n); type = L"image/png"; }
     else if (chemin == L"installation.jpg") { ressource(L"FOND", &d, &n); type = L"image/jpeg"; }
-    else if (chemin == L"couverture") { fichier = lire_fichier(dossier_mod() + L"\\couverture"); d = fichier.data(); n = (DWORD)fichier.size(); type = L"image/png"; }
+    else if (chemin == L"couverture") { fichier = lire_fichier(dossier_mod() + L"\\couverture"); d = fichier.data(); n = (DWORD)fichier.size();
+        type = fichier.size() > 2 && (unsigned char)fichier[0] == 0xFF && (unsigned char)fichier[1] == 0xD8 ? L"image/jpeg" : L"image/png"; }
     ComPtr<ICoreWebView2WebResourceResponse> rep;
     ComPtr<IStream> s;
     if (d && n) s.Attach(SHCreateMemStream((const BYTE *)d, n));
