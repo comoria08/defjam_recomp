@@ -1062,7 +1062,10 @@ static void servir(ICoreWebView2WebResourceRequestedEventArgs *args)
     const void *d = NULL; DWORD n = 0; string fichier; const wchar_t *type = L"application/octet-stream";
     if (chemin == L"page.html" || chemin.empty()) { ressource(L"PAGE", &d, &n); type = L"text/html; charset=utf-8"; }
     else if (chemin == L"icone.png") { ressource(L"ICONE_PNG", &d, &n); type = L"image/png"; }
+    else if (chemin == L"logo.png") { ressource(L"LOGO", &d, &n); type = L"image/png"; }
     else if (chemin == L"accueil.jpg") { ressource(L"ACCUEIL", &d, &n); type = L"image/jpeg"; }
+    else if (chemin == L"mod_defaut.jpg") { ressource(L"MOD_DEFAUT", &d, &n); type = L"image/jpeg"; }
+    else if (chemin == L"aucun_mod.png") { ressource(L"AUCUN_MOD", &d, &n); type = L"image/png"; }
     else if (chemin == L"installation.jpg") { ressource(L"FOND", &d, &n); type = L"image/jpeg"; }
     else if (chemin == L"couverture") { fichier = lire_fichier(dossier_mod() + L"\\couverture"); d = fichier.data(); n = (DWORD)fichier.size(); type = L"image/png"; }
     ComPtr<ICoreWebView2WebResourceResponse> rep;
@@ -1205,7 +1208,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show)
     wc.lpfnWndProc = proc; wc.hInstance = inst; wc.lpszClassName = L"DJFFNY";
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = CreateSolidBrush(RGB(11, 11, 11));
-    wc.hIcon = LoadIconW(inst, L"ICONE");
+    wc.hIcon = (HICON)LoadImageW(inst, L"ICONE", IMAGE_ICON, 0, 0, LR_DEFAULTSIZE);
+    wc.hIconSm = (HICON)LoadImageW(inst, L"ICONE", IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
     RegisterClassExW(&wc);
     UINT dpi = GetDpiForSystem();
     RECT r = { 0, 0, MulDiv(1100, dpi, 96), MulDiv(700, dpi, 96) };

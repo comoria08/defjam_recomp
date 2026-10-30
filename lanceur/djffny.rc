@@ -1,9 +1,15 @@
 // DJFFNY.exe : la page du lanceur, integree a l'exe et servie a WebView2 (djffny.cpp, servir).
-// Les images (icone, fonds) s'ajoutent ici quand elles existent : ICONE (ico), ICONE_PNG,
-// ACCUEIL et FOND (jpg), voir lanceur/images/LISEZMOI.txt.
+// Les images, generees avec ChatGPT le 2026-10-30 (lanceur/images/LISEZMOI.txt, prompts compris).
 #include <windows.h>
 
+ICONE ICON "images/icone.ico"
 PAGE RCDATA "page.html"
+ICONE_PNG RCDATA "images/icone_1024.png"
+LOGO RCDATA "images/logo_1200x400.png"
+ACCUEIL RCDATA "images/accueil_2560x1440.jpg"
+FOND RCDATA "images/installation_2560x1440.jpg"
+MOD_DEFAUT RCDATA "images/mod_defaut_600x800.jpg"
+AUCUN_MOD RCDATA "images/aucun_mod_800x600.png"
 
 1 VERSIONINFO
 FILEVERSION 1,1,0,0

@@ -220,11 +220,7 @@ function sidebar() {
     return `<button class="nav ${on ? 'on' : ''} ${enabled ? '' : 'off'}" data-act="${k}">${icon}${extra || label}</button>`;
   };
   return `<aside class="side">
-    <div style="width:188px;height:63px;display:flex;flex-direction:column;justify-content:center;padding:0 6px;margin-bottom:28px;">
-      <div class="cond" style="font-size:15px;letter-spacing:.18em;color:#9a9a9a;line-height:1;">DEF JAM</div>
-      <div class="cond" style="font-size:28px;letter-spacing:.01em;line-height:1;margin-top:3px;">FIGHT FOR NY</div>
-      <div style="font-size:9.5px;letter-spacing:.42em;color:#9a9a9a;margin-top:5px;font-weight:600;">RECOMPILED</div>
-    </div>
+    <img src="https://djffny.local/logo.png" alt="FFNY Recompiled" style="width:188px;height:63px;object-fit:contain;margin-bottom:28px;" draggable="false">
     <nav style="display:flex;flex-direction:column;gap:2px;">
       ${nav('home', 'Jouer', I.play())}
       ${nav('settings', '', I.sliders(18, '#0b0b0b'), `<span style="flex:1;">Réglages</span>${dirty() ? '<span style="width:6px;height:6px;border-radius:3px;background:#eeeeee;"></span>' : ''}`)}
@@ -240,9 +236,8 @@ function sidebar() {
   </aside>`;
 }
 
-function heroBg(label) {
-  return S.hero ? `<div class="abs" style="background:url('${S.hero}') center/cover no-repeat;"></div>`
-    : `<div class="abs stripes"></div><div class="ph" style="position:absolute;right:24px;bottom:20px;">${label}</div>`;
+function heroBg(image) {
+  return `<div class="abs" style="background:#141414 url('https://djffny.local/${image}') center/cover no-repeat;"></div>`;
 }
 
 function home() {
@@ -256,7 +251,7 @@ function home() {
       <button class="btn light" style="height:32px;padding:0 14px;font-size:13px;border-radius:5px;" data-act="update">Mettre à jour</button>
       <button class="icobtn" style="width:32px;height:32px;" title="Plus tard" data-act="dismissUpdate">${I.cross(14)}</button>
     </div>` : '';
-  return `<div class="abs">${heroBg('KEY ART · HOME HERO · 2560×1440')}
+  return `<div class="abs">${heroBg('accueil.jpg')}
     <div class="abs" style="background:linear-gradient(to top,rgba(11,11,11,.96) 0%,rgba(11,11,11,.55) 38%,rgba(11,11,11,0) 70%),linear-gradient(to right,rgba(11,11,11,.9) 0%,rgba(11,11,11,.35) 45%,rgba(11,11,11,0) 75%);pointer-events:none;"></div>
     ${upd}
     <div style="position:absolute;left:48px;bottom:44px;right:48px;animation:ffin .35s ease;">
@@ -325,11 +320,11 @@ function settings() {
 function mods() {
   const m = S.mod, busy = S.modBusy;
   const dropTxt = busy ? 'Installation en cours…' : S.modDrag ? (m ? `Relâchez pour remplacer « ${esc(m.name)} »` : 'Relâchez pour installer') : (m ? 'Déposez un fichier .mod ici pour remplacer le mod actuel' : "Déposez un fichier .mod ici pour l'installer");
-  const cover = c => c ? `<div class="abs" style="background:url('${c}') center/cover no-repeat;"></div>` : `<div class="abs stripes" style="display:flex;align-items:center;justify-content:center;"><span class="ph" style="font-size:10.5px;">COVER · 600×800</span></div>`;
+  const cover = c => `<div class="abs" style="background:#1b1b1b url('${c || 'https://djffny.local/mod_defaut.jpg'}') center/cover no-repeat;"></div>`;
   let body;
   if (!m && !busy) {
     body = `<div class="drop ${S.modDrag ? 'over' : ''}" data-drop="mod" style="min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;border-radius:10px;">
-      <div class="stripes" style="width:320px;height:240px;border-radius:8px;display:flex;align-items:center;justify-content:center;"><span class="ph">ILLUSTRATION · 800×600</span></div>
+      <img src="https://djffny.local/aucun_mod.png" alt="" style="width:320px;height:240px;" draggable="false">
       <div class="cond" style="font-size:26px;margin-top:22px;">AUCUN MOD INSTALLÉ</div>
       <div style="color:#9a9a9a;max-width:400px;margin-top:8px;line-height:1.5;">Les mods remplacent des personnages, des textures, des sons ou des modèles du jeu. Déposez un fichier .mod ici, ou choisissez-le sur votre ordinateur.</div>
       <button class="btn light" style="margin-top:20px;" data-act="installMod">Choisir un fichier .mod</button></div>`;
@@ -451,7 +446,7 @@ function wizard() {
   const showFooter = !(pr && pr.result && S.wizStep === 3);
   const nextOff = (S.wizStep === 2 && !(S.iso && S.iso.status === 'valid')) || (S.wizStep === 1 && S.build === 'msvc' && !S.vs);
   const note = running ? `${buildName()} · ${esc(S.installDir)}` : ['Étape 1 sur 4', 'Étape 2 sur 4', 'Étape 3 sur 4', ''][S.wizStep];
-  return `<div class="abs">${heroBg('INSTALLER BACKGROUND · 2560×1440')}
+  return `<div class="abs">${heroBg('installation.jpg')}
     <div class="abs" style="background:radial-gradient(ellipse at center,rgba(11,11,11,.55) 0%,rgba(11,11,11,.9) 75%);"></div>
     <div class="abs" style="display:flex;align-items:center;justify-content:center;padding:28px;">
       <div style="width:100%;max-width:700px;max-height:100%;display:flex;flex-direction:column;background:rgba(20,20,20,.94);backdrop-filter:blur(14px);border:1px solid #262626;border-radius:12px;box-shadow:0 30px 80px -20px rgba(0,0,0,.8);overflow:hidden;">
@@ -483,7 +478,8 @@ function overlays() {
     h += `<div class="overlay" data-act="closeAbout"><div class="dialog" data-stop="1" style="width:520px;max-height:calc(100% - 48px);overflow:auto;">
       <div style="display:flex;align-items:center;gap:16px;padding:24px 24px 18px;">
         <img src="https://djffny.local/icone.png" alt="" onerror="this.removeAttribute('src')" style="width:64px;height:64px;flex:none;border-radius:14px;background:repeating-linear-gradient(135deg,#2a2a2a 0 6px,#222 6px 12px);">
-        <div style="flex:1;"><div class="cond" style="font-size:24px;line-height:1;">FIGHT FOR NY — RECOMPILED</div><div class="mono" style="color:#9a9a9a;font-size:12.5px;margin-top:6px;">Launcher v${esc(S.version)}${S.installed ? ' · ' + buildName() : ''}</div></div>
+        <div style="flex:1;"><div class="cond" style="font-size:24px;line-height:1;">FIGHT FOR NY — RECOMPILED</div><div class="mono" style="color:#9a9a9a;font-size:12.5px;margin-top:6px;">Launcher v${esc(S.version)}${S.installed ? ' · ' + buildName() : ''}</div>
+          <div style="color:#c9c9c9;font-size:12.5px;margin-top:4px;">by comoria08</div></div>
         <button class="icobtn" style="width:30px;height:30px;align-self:flex-start;" data-act="closeAbout">${I.cross(13)}</button></div>
       <div style="padding:0 24px;color:#c9c9c9;line-height:1.55;font-size:13px;">Port PC non officiel, réalisé par des fans. Ce projet n'est affilié ni à Electronic Arts, ni à Def Jam Recordings, ni à AKI Corporation. Aucun fichier du jeu n'est distribué : le jeu est reconstruit à partir de votre propre image disque.</div>
       <div class="sect" style="margin:22px 24px 8px;">LICENCES</div>
