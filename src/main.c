@@ -83,6 +83,9 @@ extern RECOMP_TLS int g_fp_cmp;
 extern RECOMP_TLS RecompXmm g_xmm0, g_xmm1, g_xmm2, g_xmm3;
 extern RECOMP_TLS RecompXmm g_xmm4, g_xmm5, g_xmm6, g_xmm7;
 extern ptrdiff_t g_xbox_mem_offset;
+#define CORE_MAX 256                 /* coreID 0 a 141 du jeu (86 a 141 : le heros), clones 142 a 255 */
+extern int g_core_donneur[CORE_MAX]; /* coreID clone -> son donneur (coreid.txt), -1 sinon */
+extern int g_core_voix[CORE_MAX];    /* sa voix ; lue par recomp_manual.c pour les coreID >= 104 */
 
 /* ── XBE Constants ─────────────────────────────────────────── */
 
@@ -360,14 +363,10 @@ static void print_guest_context(void *rip)
     }
 }
 
-/* Emulated MCPX APU (xbox_apu, from xemu). g_apu_state is defined by
- * src/apu/apu_mmio_hook.c and consulted by apu_hook_handle_mmio(); the host
- * creates the state and routes the faults, which is what these two do. The
- * APU's 512K register window is only unmapped (and so only faults) when
- * RECOMP_AC97_READY is set -- see xbox_memory_layout.c. */
-extern MCPXAPUState *g_apu_state;
-extern bool apu_hook_handle_mmio(PCONTEXT ctx, uintptr_t fault_addr,
-                                 uint32_t fault_xbox_va, int is_write);
+/* La fenetre de registres de l'APU. Plus rien ne l'emule : DirectSound est
+ * remplace a ses points d'entree (src/dsound_hle du toolkit, GUIDE_FR.md
+ * points 166-167). Elle ne faute que sous RECOMP_AC97_READY (voir
+ * xbox_memory_layout.c), et un acces y est signale. */
 #define APU_MMIO_LO 0xFE800000u
 #define APU_MMIO_HI 0xFE880000u
 
@@ -460,14 +459,10 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
             return EXCEPTION_CONTINUE_EXECUTION;
         }
 
-        /* DirectSound (the XDK library linked into the title) programs the
-         * APU through these registers. Decode the instruction, perform the
-         * access on the emulated APU, and resume after it. */
-        if (fault_va >= APU_MMIO_LO && fault_va < APU_MMIO_HI) {
-            int is_write = ep->ExceptionRecord->ExceptionInformation[0] ? 1 : 0;
-            if (apu_hook_handle_mmio(ep->ContextRecord, fault_addr, fault_va, is_write))
-                return EXCEPTION_CONTINUE_EXECUTION;
-        }
+        /* Personne ne doit toucher aux registres de l'APU : signale, puis la
+         * faute suit son cours. */
+        if (fault_va >= APU_MMIO_LO && fault_va < APU_MMIO_HI)
+            dsound_hle_acces_apu(fault_va);
 
         /* USB host controller registers, when the model is on. */
         if (xbox_OhciOwnsAddress(fault_va)
@@ -710,13 +705,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * it was given would have written. Values from RECOMP_PEEK at the hang. */
     xbox_Nv2aMirrorFence(0x00234768, 0x2C, 0x30);
 
-    /* Emulated APU, fed the base of guest physical RAM (guest VA 0 is native
-     * g_xbox_mem_offset). Harmless when the register window is plain memory;
-     * with RECOMP_AC97_READY set it answers DirectSound's register traffic. */
-    g_apu_state = mcpx_apu_init_standalone((uint8_t *)(uintptr_t)g_xbox_mem_offset);
-    if (!g_apu_state)
-        fprintf(stderr, "[BOOT] APU emulation unavailable\n");
-
     /* USB host controllers. No-op unless RECOMP_USB is set. */
     xbox_OhciInit();
 
@@ -758,6 +746,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         }
     }
 
+    for (int k = 0; k < CORE_MAX; k++)
+        g_core_donneur[k] = -1;
     /* Le dossier mods : les coreID clones (point 105 de GUIDE_FR.md).
      *
      * Tout ce qu'un coreID porte vit dans des fichiers que le dossier mods
@@ -770,7 +760,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * game_files\mods\coreid.txt : une ligne par coreID clone,
      *     <coreID> <donneur> <voix>
      * L'entree <coreID> recoit les 12 octets de celle du donneur, puis la voix
-     * donnee. Ecrit par outils\coreid.py. RECOMP_MODS=0 l'ignore. */
+     * donnee. Ecrit par outils\coreid.py. RECOMP_MODS=0 l'ignore.
+     *
+     * Au-dela de 103 (2026-10-27) : main_all.dat et wres_all ont 141 coreID,
+     * seul le heros (141) en porte un ; 104 a 140 sont libres, mais la table
+     * des voix s'arrete a 103 (ce qui la suit sert ailleurs). Ces clones-la
+     * sont notes ici et poses par recomp_manual.c (sub_0003E170) dans une
+     * copie agrandie de la table, que le jeu lit a la place (patch_gen.py).
+     *
+     * Depuis le 30 octobre, 86 a 141 sont rendus au heros (un coreID par
+     * combinaison de styles) et les clones vont de 142 a CORE_MAX - 1 ; leurs
+     * paires de main_all.dat suivent la 141e (recomp_manual.c, sub_001A47B0). */
     {
         const char *m = getenv("RECOMP_MODS");
         FILE *f = (m && *m == '0') ? NULL : fopen(YOUR_GAME_DIR "/mods/coreid.txt", "r");
@@ -781,13 +781,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                 int core, donor, voice;
                 if (line[0] == '#' || sscanf(line, "%d %d %d", &core, &donor, &voice) != 3)
                     continue;
-                if (core < 0 || core > 103 || donor < 0 || donor > 103) {
-                    fprintf(stderr, "  [MODS] coreid.txt : %d ou %d hors de la table (0 a 103)\n",
-                            core, donor);
+                if (core < 1 || core > CORE_MAX - 1 || donor < 0 || donor > 103) {
+                    fprintf(stderr, "  [MODS] coreid.txt : %d ou %d hors limites (clone 1 a %d,"
+                            " donneur 0 a 103)\n", core, donor, CORE_MAX - 1);
                     continue;
                 }
-                memmove(table + 12 * core, table + 12 * donor, 12);
-                memcpy(table + 12 * core, &voice, 4);
+                g_core_donneur[core] = donor;   /* recomp_manual.c, sub_00087AF0 : entree et victoire
+                                                * du modele, pas celles du heros */
+                g_core_voix[core] = voice;
+                if (core <= 103) {
+                    memmove(table + 12 * core, table + 12 * donor, 12);
+                    memcpy(table + 12 * core, &voice, 4);
+                }
                 fprintf(stderr, "  [MODS] coreID %d : entree de %d, voix %d\n", core, donor, voice);
             }
         }

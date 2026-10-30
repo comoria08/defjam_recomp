@@ -64,6 +64,11 @@ if(RECOMP_STREAMLINE_DIR)
     set(CMAKE_CXX_STANDARD 17)
 endif()
 
+# Le son passe par DirectSound en haut niveau (src/dsound_hle du toolkit, points
+# 166-167 de GUIDE_FR.md) : ni l'emulation de l'APU (xemu) ni son coeur DSP sous
+# GPL ne sont construits ni lies.
+set(XBOXRECOMP_APU OFF CACHE BOOL "Emulation de l'APU (xbox_apu, xbox_dsound)" FORCE)
+
 # Add xboxrecomp as a subdirectory -- this builds all 6 runtime libraries
 # and provides the 'xboxrecomp' umbrella target to link against.
 add_subdirectory(${XBOXRECOMP_DIR} ${CMAKE_BINARY_DIR}/xboxrecomp)
@@ -83,8 +88,10 @@ file(GLOB RECOMP_GEN_SOURCES CONFIGURE_DEPENDS "src/recomp/gen/*.c")
 set(GAME_SOURCES
     src/main.c
     src/recomp_manual.c
+    src/recomp_patch.c
     src/lanceur.c
     src/pad_aleatoire.c
+    src/autopilote.c
     # Add game-specific sources here, e.g.:
     # src/asset_loader.c
     # src/custom_renderer.c

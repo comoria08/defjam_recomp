@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Def Jam: Fight for NY — Recompiled</title>
+<!--
+  La page du lanceur DJFFNY.exe (lanceur/djffny.cpp), d'apres la maquette de Claude Design
+  du 2026-10-30. Autonome : ni framework ni ressource externe. Chaque action part vers l'hote
+  par window.chrome.webview.postMessage ; l'hote repond par des messages { type, ... }.
+  Ouverte dans un navigateur, sans hote, une petite simulation repond a sa place.
+-->
+<style>
+html,body{margin:0;padding:0;background:#0b0b0b;height:100%;}
+*{box-sizing:border-box;}
+body{color:#eeeeee;font-family:'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif;font-size:14px;overflow:hidden;user-select:none;}
+a{color:#eeeeee;}
+button{font:inherit;}
+@keyframes ffspin{to{transform:rotate(360deg)}}
+@keyframes ffin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+select option{background:#1b1b1b;color:#eeeeee;}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#2a2a2a;border-radius:5px;border:2px solid #0b0b0b}::-webkit-scrollbar-track{background:transparent}
+.cond{font-family:'Bahnschrift','Arial Narrow','Helvetica Neue',Impact,sans-serif;font-stretch:condensed;font-weight:700;}
+.mono{font-family:'Cascadia Mono',Consolas,monospace;}
+.app{display:flex;width:100vw;height:100vh;min-width:960px;min-height:600px;background:#0b0b0b;overflow:hidden;}
+.side{width:220px;flex:none;background:#0b0b0b;border-right:1px solid #1a1a1a;display:flex;flex-direction:column;padding:22px 14px 16px;}
+.nav{display:flex;align-items:center;gap:12px;height:40px;padding:0 12px;border:0;border-radius:6px;font-size:14px;font-weight:600;text-align:left;cursor:pointer;transition:background .15s,color .15s;background:transparent;color:#9a9a9a;}
+.nav:hover{background:#161616;color:#eeeeee;}
+.nav.on{background:#1b1b1b;color:#eeeeee;}
+.nav.off{opacity:.35;}
+.sub{display:flex;align-items:center;gap:10px;height:34px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:#9a9a9a;font-size:13px;cursor:pointer;text-align:left;transition:background .15s,color .15s;}
+.sub:hover{background:#161616;color:#eeeeee;}
+main{flex:1;min-width:0;position:relative;overflow:hidden;background:#141414;}
+.abs{position:absolute;inset:0;}
+.btn{height:38px;padding:0 16px;border:1px solid #2e2e2e;border-radius:6px;background:transparent;color:#eeeeee;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;}
+.btn:hover{background:#222;}.btn:active{transform:scale(.97);}
+.btn.sm{height:34px;padding:0 14px;font-size:13px;font-weight:400;}
+.btn.xs{height:30px;padding:0 12px;font-size:12.5px;font-weight:400;border-radius:5px;}
+.btn.light{border:0;background:#eeeeee;color:#0b0b0b;}.btn.light:hover{background:#fff;}
+.btn.red{border:0;background:#C8102E;color:#fff;}.btn.red:hover{background:#DC1C3C;}.btn.red:active{background:#A80D26;}
+.btn.danger{border-color:#4a1a22;color:#ff8a98;font-weight:400;}.btn.danger:hover{background:#2a1216;}
+.play{height:60px;min-width:232px;padding:0 34px;display:flex;align-items:center;justify-content:center;gap:14px;border:0;border-radius:6px;background:#C8102E;color:#fff;font-size:26px;letter-spacing:.08em;cursor:pointer;box-shadow:0 10px 30px -10px rgba(200,16,46,.7);transition:background .15s,transform .1s,box-shadow .15s;}
+.play:hover{background:#DC1C3C;box-shadow:0 14px 36px -10px rgba(200,16,46,.85);}.play:active{transform:scale(.975);background:#A80D26;}
+.icobtn{display:flex;align-items:center;justify-content:center;border:0;border-radius:5px;background:transparent;color:#9a9a9a;cursor:pointer;}
+.icobtn:hover{background:#262626;color:#eeeeee;}
+.h1{margin:0;font-size:40px;letter-spacing:.01em;}
+.sect{font-size:11px;letter-spacing:.2em;font-weight:700;color:#9a9a9a;margin:0 0 10px 2px;}
+.card{background:#1b1b1b;border:1px solid #232323;border-radius:8px;overflow:hidden;}
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:center;padding:14px 18px;transition:opacity .2s;}
+.row+.row{border-top:1px solid #242424;}
+.lbl{font-weight:600;font-size:14px;}.desc{color:#9a9a9a;font-size:12.5px;margin-top:3px;line-height:1.45;}
+.sw{position:relative;width:40px;height:22px;border:0;border-radius:11px;padding:0;cursor:pointer;transition:background .18s;}
+.sw span{position:absolute;top:3px;width:16px;height:16px;border-radius:8px;transition:left .18s,background .18s;}
+.seg{display:flex;padding:3px;gap:2px;background:#141414;border:1px solid #2e2e2e;border-radius:7px;}
+.seg button{height:26px;min-width:58px;padding:0 12px;border:0;border-radius:5px;font-size:12.5px;font-weight:600;cursor:pointer;transition:background .15s,color .15s;}
+.field{height:34px;background:#141414;color:#eeeeee;border:1px solid #2e2e2e;border-radius:6px;font-size:13px;outline:none;}
+.spin{display:inline-block;flex:none;border-radius:50%;border:2px solid rgba(255,255,255,.22);border-top-color:#fff;animation:ffspin .8s linear infinite;}
+.stripes{background:repeating-linear-gradient(135deg,#1d1d1d 0 16px,#181818 16px 32px);}
+.ph{font-family:'Cascadia Mono',Consolas,monospace;font-size:11px;color:#6a6a6a;letter-spacing:.04em;}
+.drop{border:1.5px dashed #2e2e2e;transition:background .15s,border-color .15s;}
+.drop.over{border-color:#eeeeee;background:rgba(255,255,255,.04);}
+.modcard{background:#1b1b1b;border:1px solid #242424;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;transition:transform .18s,border-color .18s;animation:ffin .3s ease;}
+.modcard:hover{transform:translateY(-2px);border-color:#383838;}
+.overlay{position:absolute;inset:0;z-index:40;background:rgba(0,0,0,.62);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;animation:ffin .15s ease;}
+.dialog{background:#1b1b1b;border:1px solid #2a2a2a;border-radius:12px;box-shadow:0 30px 80px -20px rgba(0,0,0,.9);}
+.buildcard{text-align:left;padding:20px;border-radius:10px;color:#eeeeee;cursor:pointer;display:flex;flex-direction:column;gap:12px;min-height:200px;transition:border-color .15s,background .15s,transform .1s;}
+.buildcard:hover{border-color:#555 !important;}.buildcard:active{transform:scale(.99);}
+.fade{animation:ffin .25s ease;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+'use strict';
+const RES = [[640,480],[1280,960],[1920,1440],[2560,1920],[3200,2400],[3840,2880]];
+const STEPS = ['Téléchargement','Vérification du disque','Extraction','Recompilation vers C','Compilation','Finitions'];
+const GREEN = 'oklch(0.74 0.15 150)', ERR = 'oklch(0.66 0.19 22)';
+const DEFAULTS = { res: 3, aspect: '16:9', cutsceneFull: true, menus43: false, dlss: 'off', fullscreen: false,
+  bilinear: true, mips: true, effects: true, hdPack: false, hdPath: '', mods: true, unlockAll: false, xboxPad: false };
+const mmss = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const S = {
+  ready: false, installed: false, screen: 'wizard', wizStep: 0,
+  installDir: 'C:\\Jeux\\DefJam-FFNY', freeSpace: '', diskUsed: '50%', required: 'environ 4,5 Go',
+  build: 'clang', vs: '', dlssBuilt: false, iso: null, isoChecking: false, isoDrag: false,
+  prog: null, logOpen: false,
+  settings: { ...DEFAULTS }, saved: { ...DEFAULTS },
+  mod: null, modBusy: null, modDrag: false,
+  gameRunning: false, update: null, updateDismissed: false,
+  modal: null, about: false, toasts: [], version: '1.0', gameVersion: '', builtOn: '', gameSize: '', isoName: '',
+  hero: '', licences: []
+};
+
+// ---------- l'hote ----------
+const host = window.chrome && window.chrome.webview;
+function send(msg, objets) {
+  if (host) { if (objets && host.postMessageWithAdditionalObjects) host.postMessageWithAdditionalObjects(msg, objets); else host.postMessage(msg); }
+  else simuler(msg);
+}
+if (host) host.addEventListener('message', e => onHost(e.data));
+
+function set(patch) { Object.assign(S, typeof patch === 'function' ? patch(S) : patch); render(); }
+
+function onHost(m) {
+  if (!m || !m.type) return;
+  switch (m.type) {
+    case 'state': {
+      const st = m.state || {};
+      const patch = { ...st, ready: true };
+      if (st.free != null) { patch.freeSpace = st.free; patch.diskUsed = st.used; }
+      if (st.settings) { patch.settings = { ...DEFAULTS, ...st.settings }; patch.saved = { ...DEFAULTS, ...st.settings }; }
+      if (!S.ready) patch.screen = st.installed ? 'home' : 'wizard';
+      return set(patch);
+    }
+    case 'folderPicked': return set({ installDir: m.path, freeSpace: m.free, diskUsed: m.used || '50%' });
+    case 'isoChecked': return set({ isoChecking: false, iso: m.status ? { status: m.status, file: m.file, size: m.size } : null });
+    case 'installProgress': return set(s => {
+      const log = s.prog ? s.prog.log : [];
+      if (m.line) log.push({ time: mmss(m.elapsed), text: m.line, level: m.level || 'info' });
+      return { prog: { ...s.prog, step: m.step, stepPct: m.stepPct, pct: m.pct, elapsed: m.elapsed, log, result: null } };
+    });
+    case 'installDone': return set(s => ({ prog: { ...s.prog, result: m.ok ? 'ok' : 'fail', error: m.error, failStep: m.step, pct: m.ok ? 1 : s.prog.pct },
+      installed: m.ok ? true : s.installed, logOpen: !m.ok, gameSize: m.size || s.gameSize, build: m.build || s.build, dlssBuilt: m.dlssBuilt != null ? m.dlssBuilt : s.dlssBuilt, update: m.ok ? null : s.update }));
+    case 'installCancelled': set({ prog: null, wizStep: S.installed ? 0 : 2, screen: S.installed ? 'install' : 'wizard' }); return toast('info', 'Installation annulée', 'Les fichiers téléchargés ont été supprimés.');
+    case 'gameStarted': return set({ gameRunning: true });
+    case 'gameExited': return set({ gameRunning: false });
+    case 'settingsSaved': return set(s => ({ saved: { ...s.settings } }));
+    case 'mod': return set({ mod: m.mod || null, modBusy: null });
+    case 'modProgress': return set({ modBusy: { name: m.name, pct: m.pct } });
+    case 'hdPicked': return set(s => ({ settings: { ...s.settings, hdPath: m.path, hdPack: true } }));
+    case 'update': return set({ update: m.version ? { version: m.version, notes: m.notes } : null });
+    case 'uninstalled': set({ installed: false, screen: 'wizard', wizStep: 0, prog: null, iso: null, mod: null }); return toast('info', 'Jeu désinstallé', "Votre image disque n'a pas été modifiée.");
+    case 'error': return toast('error', m.title, m.text);
+    case 'info': return toast('info', m.title, m.text);
+  }
+}
+
+function toast(kind, title, text) {
+  const id = Math.random();
+  set(s => ({ toasts: [...s.toasts, { id, kind, title, text }].slice(-3) }));
+  setTimeout(() => set(s => ({ toasts: s.toasts.filter(t => t.id !== id) })), kind === 'error' ? 6000 : 3500);
+}
+
+// ---------- actions ----------
+const dirty = () => JSON.stringify(S.settings) !== JSON.stringify(S.saved);
+function go(screen) {
+  if (!S.installed && screen !== 'install' && screen !== 'wizard') return;
+  if (screen === 'install' && !S.installed) screen = 'wizard';
+  if (S.screen === 'wizard' && S.prog && !S.prog.result && screen !== 'wizard') return;
+  set({ screen, modal: null });
+}
+function startInstall(reason) {
+  set({ screen: 'wizard', wizStep: 3, prog: { step: 0, pct: 0, stepPct: 0, elapsed: 0, log: [], result: null } });
+  send({ type: 'startInstall', dir: S.installDir, build: S.build, iso: S.iso && S.iso.file, reason });
+}
+function launch() {
+  if (S.gameRunning) return;
+  send({ type: 'launch' });
+  if (S.screen !== 'home') set({ screen: 'home' });
+}
+function confirmBox(o) { set({ modal: o }); }
+function installMod(objets) {
+  if (S.modBusy) return toast('error', 'Installation déjà en cours', "Patientez jusqu'à la fin de l'installation.");
+  const go = () => send({ type: 'installMod' }, objets);
+  if (!S.mod) return go();
+  confirmBox({ title: `REMPLACER « ${S.mod.name.toUpperCase()} » ?`, body: `Un seul mod peut être actif. « ${S.mod.name} » sera retiré et remplacé par le nouveau mod.`, confirm: 'Remplacer', action: go });
+}
+const setS = (k, v) => set(s => ({ settings: { ...s.settings, [k]: v } }));
+
+const A = {
+  home: () => go('home'), settings: () => go('settings'), mods: () => go('mods'), install: () => go('install'),
+  log: () => send({ type: 'openLog' }), about: () => set({ about: true }), closeAbout: () => set({ about: false }),
+  update: () => confirmBox({ title: 'METTRE À JOUR ?', body: `La version ${S.update.version} sera téléchargée et le jeu recompilé depuis votre image disque. Vos réglages et votre mod sont conservés.`, confirm: 'Mettre à jour', action: () => startInstall('update') }),
+  dismissUpdate: () => set({ updateDismissed: true }),
+  launch, revert: () => set(s => ({ settings: { ...s.saved } })),
+  save: () => { if (!dirty()) return; send({ type: 'saveSettings', settings: S.settings }); toast('info', 'Réglages enregistrés', 'Ils seront appliqués au prochain lancement.'); },
+  saveAndPlay: () => { send({ type: 'saveSettings', settings: S.settings }); set(s => ({ saved: { ...s.settings }, screen: 'home' })); setTimeout(launch, 50); },
+  browseHd: () => send({ type: 'browseHdPack' }),
+  installMod: () => installMod(),
+  modsFolder: () => send({ type: 'openFolder', what: 'mods' }),
+  removeMod: () => confirmBox({ title: `RETIRER « ${S.mod.name.toUpperCase()} » ?`, body: `Les ${S.mod.files} fichiers de ce mod seront supprimés du dossier des mods, et ce qu'il avait remplacé sera remis. Vous pourrez le réinstaller plus tard depuis son fichier .mod.`, confirm: 'Retirer', danger: true, action: () => send({ type: 'removeMod' }) }),
+  gameFolder: () => send({ type: 'openFolder', what: 'game' }),
+  askSwitch: () => { const to = S.build === 'msvc' ? 'clang' : 'msvc'; confirmBox({ title: `PASSER À ${to === 'msvc' ? 'MSVC + DLSS' : 'CLANG'} ?`, body: to === 'msvc' ? 'Le jeu sera recompilé avec Visual Studio. Vos réglages et votre mod sont conservés.' : 'Le jeu sera recompilé avec Clang. Le DLSS ne sera plus disponible. Vos réglages et votre mod sont conservés.', confirm: 'Recompiler', action: () => { set({ build: to }); startInstall('switch'); } }); },
+  askRepair: () => confirmBox({ title: "RÉPARER L'INSTALLATION ?", body: 'Le jeu sera recompilé depuis votre image disque. Vos réglages et votre mod sont conservés.', confirm: 'Réparer', action: () => startInstall('repair') }),
+  askUninstall: () => confirmBox({ title: 'DÉSINSTALLER LE JEU ?', body: `Le jeu recompilé sera supprimé de ${S.installDir}, avec votre mod et vos réglages. Votre image disque n'est pas modifiée.`, confirm: 'Désinstaller', danger: true, action: () => send({ type: 'uninstall' }) }),
+  browseDir: () => send({ type: 'browseFolder' }),
+  pickClang: () => set({ build: 'clang' }), pickMsvc: () => set({ build: 'msvc' }),
+  pickIso: () => { if (S.isoChecking) return; set({ isoChecking: true }); send({ type: 'pickIso' }); },
+  back: () => set({ wizStep: Math.max(0, S.wizStep - 1) }),
+  next: () => { if (S.wizStep === 2 && !(S.iso && S.iso.status === 'valid')) return; if (S.wizStep === 1 && S.build === 'msvc' && !S.vs) return toast('error', 'Visual Studio introuvable', 'Installez Visual Studio 2022 avec le C++, ou choisissez la version Clang.'); if (S.wizStep === 2) startInstall('install'); else set({ wizStep: S.wizStep + 1 }); },
+  askCancel: () => confirmBox({ title: "ANNULER L'INSTALLATION ?", body: "La progression sera perdue et les fichiers temporaires supprimés. Votre image disque n'est pas modifiée.", confirm: "Annuler l'installation", cancel: 'Continuer', danger: true, action: () => send({ type: 'cancelInstall' }) }),
+  toggleLog: () => set({ logOpen: !S.logOpen }),
+  finish: () => { set({ screen: 'home', wizStep: 0, prog: null }); setTimeout(launch, 50); },
+  retry: () => startInstall('retry'),
+  closeModal: () => set({ modal: null }),
+  confirmModal: () => { const a = S.modal && S.modal.action; set({ modal: null }); if (a) a(); },
+  repo: () => send({ type: 'openUrl', url: 'https://github.com/comoria08/defjam_recomp' }),
+  licences: () => send({ type: 'openFolder', what: 'licences' }),
+  closeToast: el => set(s => ({ toasts: s.toasts.filter(t => String(t.id) !== el.dataset.id) }))
+};
+
+// ---------- rendu ----------
+const I = {
+  play: (w = 18) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="currentColor"><path d="M6 3.5v17l14.5-8.5z"/></svg>`,
+  sliders: (w, bg) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="9" cy="7" r="2.4" fill="${bg}"/><circle cx="15" cy="17" r="2.4" fill="${bg}"/></svg>`,
+  folder: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v10H3z"/></svg>',
+  check: (w, c, sw = 2.8) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,12.5 10,17.5 19,7"/></svg>`,
+  cross: (w, sw = 2.4) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>`,
+  info: w => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.8" r="0.6" fill="currentColor"/></svg>`,
+  warn: (w, c) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3.5 22 20.5H2z"/><line x1="12" y1="10" x2="12" y2="14.5"/><circle cx="12" cy="17.3" r="0.6" fill="${c}"/></svg>`
+};
+const spin = n => `<span class="spin" style="width:${n}px;height:${n}px"></span>`;
+const buildName = b => (b || S.build) === 'msvc' ? 'MSVC + DLSS' : 'Clang';
+
+function sidebar() {
+  const nav = (k, label, icon, extra = '') => {
+    const on = S.screen === k || (k === 'install' && S.screen === 'wizard');
+    const enabled = k === 'install' || S.installed;
+    return `<button class="nav ${on ? 'on' : ''} ${enabled ? '' : 'off'}" data-act="${k}">${icon}${extra || label}</button>`;
+  };
+  return `<aside class="side">
+    <div style="width:188px;height:63px;display:flex;flex-direction:column;justify-content:center;padding:0 6px;margin-bottom:28px;">
+      <div class="cond" style="font-size:15px;letter-spacing:.18em;color:#9a9a9a;line-height:1;">DEF JAM</div>
+      <div class="cond" style="font-size:28px;letter-spacing:.01em;line-height:1;margin-top:3px;">FIGHT FOR NY</div>
+      <div style="font-size:9.5px;letter-spacing:.42em;color:#9a9a9a;margin-top:5px;font-weight:600;">RECOMPILED</div>
+    </div>
+    <nav style="display:flex;flex-direction:column;gap:2px;">
+      ${nav('home', 'Jouer', I.play())}
+      ${nav('settings', '', I.sliders(18, '#0b0b0b'), `<span style="flex:1;">Réglages</span>${dirty() ? '<span style="width:6px;height:6px;border-radius:3px;background:#eeeeee;"></span>' : ''}`)}
+      ${nav('mods', '', '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>', `<span style="flex:1;">Mods</span><span style="font-size:12px;color:#9a9a9a;font-weight:500;">${S.mod ? 1 : ''}</span>`)}
+      ${nav('install', 'Installation', '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="13" width="18" height="7" rx="1.5"/><line x1="12" y1="3" x2="12" y2="10"/><polyline points="8.5,7 12,10.5 15.5,7"/><circle cx="17" cy="16.5" r="0.6" fill="currentColor"/></svg>')}
+    </nav>
+    <div style="flex:1;"></div>
+    <div style="display:flex;flex-direction:column;gap:2px;border-top:1px solid #1a1a1a;padding-top:12px;">
+      <button class="sub" data-act="log"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="3" width="14" height="18" rx="1.5"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>Journal</button>
+      <button class="sub" data-act="about">${I.info(16)}À propos</button>
+      <div class="mono" style="padding:10px 12px 0;font-size:11px;color:#5e5e5e;">Launcher v${esc(S.version)}</div>
+    </div>
+  </aside>`;
+}
+
+function heroBg(label) {
+  return S.hero ? `<div class="abs" style="background:url('${S.hero}') center/cover no-repeat;"></div>`
+    : `<div class="abs stripes"></div><div class="ph" style="position:absolute;right:24px;bottom:20px;">${label}</div>`;
+}
+
+function home() {
+  const sv = S.saved, [rw, rh] = RES[sv.res];
+  const items = [buildName(), `${rw} × ${rh} (×${sv.res + 1})`, sv.aspect, !sv.mods ? 'Mods désactivés' : (S.mod ? `Mod : ${S.mod.name}` : 'Aucun mod')];
+  const upd = S.update && !S.updateDismissed ? `
+    <div style="position:absolute;top:20px;left:28px;right:28px;display:flex;align-items:center;gap:14px;padding:12px 12px 12px 16px;background:rgba(20,20,20,.88);backdrop-filter:blur(10px);border:1px solid #2a2a2a;border-radius:8px;animation:ffin .3s ease;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#eeeeee" stroke-width="2" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="15"/><polyline points="7.5,10.5 12,15 16.5,10.5"/><line x1="5" y1="20" x2="19" y2="20"/></svg>
+      <div style="flex:1;min-width:0;"><div style="font-weight:600;">Mise à jour disponible : ${esc(S.update.version)}</div>
+        <div style="color:#9a9a9a;font-size:12.5px;margin-top:2px;">${esc(S.update.notes || 'Le jeu sera recompilé depuis votre image disque.')}</div></div>
+      <button class="btn light" style="height:32px;padding:0 14px;font-size:13px;border-radius:5px;" data-act="update">Mettre à jour</button>
+      <button class="icobtn" style="width:32px;height:32px;" title="Plus tard" data-act="dismissUpdate">${I.cross(14)}</button>
+    </div>` : '';
+  return `<div class="abs">${heroBg('KEY ART · HOME HERO · 2560×1440')}
+    <div class="abs" style="background:linear-gradient(to top,rgba(11,11,11,.96) 0%,rgba(11,11,11,.55) 38%,rgba(11,11,11,0) 70%),linear-gradient(to right,rgba(11,11,11,.9) 0%,rgba(11,11,11,.35) 45%,rgba(11,11,11,0) 75%);pointer-events:none;"></div>
+    ${upd}
+    <div style="position:absolute;left:48px;bottom:44px;right:48px;animation:ffin .35s ease;">
+      <div style="font-size:11px;letter-spacing:.28em;color:#9a9a9a;font-weight:600;margin-bottom:14px;">XBOX · 2004 · PORT PC NON OFFICIEL</div>
+      <div class="cond" style="line-height:.88;"><div style="font-size:40px;letter-spacing:.16em;color:#d8d8d8;">DEF JAM</div><div style="font-size:104px;letter-spacing:-.005em;margin-top:6px;">FIGHT FOR NY</div></div>
+      <div style="font-size:13px;letter-spacing:.5em;color:#9a9a9a;font-weight:600;margin:14px 0 30px 2px;">RECOMPILED</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="play cond" data-act="launch" style="opacity:${S.gameRunning ? .75 : 1};">${S.gameRunning ? spin(18) : I.play(20)}${S.gameRunning ? 'EN COURS' : 'JOUER'}</button>
+        <button data-act="settings" title="Réglages" style="width:60px;height:60px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.12);border-radius:6px;background:rgba(27,27,27,.75);backdrop-filter:blur(8px);color:#eeeeee;cursor:pointer;">${I.sliders(22, '#1b1b1b')}</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:18px;color:#9a9a9a;font-size:13px;">
+        ${items.map((t, i) => `<span style="display:flex;align-items:center;gap:10px;"><span style="color:#d0d0d0;">${esc(t)}</span>${i < items.length - 1 ? '<span style="width:3px;height:3px;border-radius:2px;background:#5a5a5a;"></span>' : ''}</span>`).join('')}
+      </div>
+    </div></div>`;
+}
+
+function settings() {
+  const st = S.settings, is169 = st.aspect === '16:9';
+  const no169 = { disabled: !is169, reason: 'Disponible en 16:9 uniquement.' };
+  const row = (o, control) => `<div class="row" style="opacity:${o.disabled ? .42 : 1};"><div style="min-width:0;"><div class="lbl">${o.label}</div><div class="desc">${o.desc}</div>
+      ${o.disabled && o.reason ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:#c9c9c9;">${I.info(13)}${o.reason}</div>` : ''}</div>
+      <div style="display:flex;align-items:center;gap:8px;pointer-events:${o.disabled ? 'none' : 'auto'};">${control}</div></div>`;
+  const tg = (key, label, desc, extra = {}) => {
+    const on = !!st[key] && !extra.disabled;
+    return row({ label, desc, ...extra }, `<button class="sw" role="switch" data-toggle="${key}" style="background:${on ? '#eeeeee' : '#333333'};"><span style="left:${on ? '21px' : '3px'};background:${on ? '#141414' : '#9a9a9a'};"></span></button>`);
+  };
+  const seg = (key, label, desc, opts, extra = {}) => row({ label, desc, ...extra }, `<div class="seg">${opts.map(([v, l]) => `<button data-seg="${key}" data-v="${v}" style="background:${st[key] === v ? '#eeeeee' : 'transparent'};color:${st[key] === v ? '#0b0b0b' : '#9a9a9a'};">${l}</button>`).join('')}</div>`);
+  const sections = [
+    ['IMAGE', [
+      row({ label: 'Résolution interne', desc: "Rendu interne du jeu, multiple de la résolution Xbox d'origine." },
+        `<select class="field" data-select="res" style="min-width:210px;padding:0 12px;cursor:pointer;">${RES.map(([w, h], i) => `<option value="${i}" ${st.res === i ? 'selected' : ''}>${w} × ${h}  (×${i + 1})</option>`).join('')}</select>`),
+      seg('aspect', "Format d'image", '4:3 respecte le jeu original. 16:9 élargit le champ de vision.', [['4:3', '4:3'], ['16:9', '16:9']]),
+      tg('cutsceneFull', 'Cinématiques en pleine hauteur', 'Recadre les cinématiques pour remplir un écran 16:9.', no169),
+      tg('menus43', "Menus conservés en 4:3", "Garde les menus et l'interface au format d'origine, sans les étirer.", no169),
+      seg('dlss', 'DLSS', "DLAA améliore l'anticrénelage sur les cartes NVIDIA RTX.", [['off', 'Off'], ['dlaa', 'DLAA']], S.dlssBuilt ? {} : { disabled: true, reason: "Indisponible avec cette version. Installez la version MSVC + DLSS depuis Installation." }),
+      tg('fullscreen', 'Plein écran au démarrage', 'F11 bascule entre fenêtre et plein écran en jeu.')]],
+    ['TEXTURES', [
+      tg('bilinear', 'Filtrage bilinéaire', 'Adoucit les textures agrandies.'),
+      tg('mips', 'Mipmaps + anisotrope 16×', 'Textures nettes au loin, sans scintillement.'),
+      tg('effects', 'Effets de rendu', 'Reflets au sol et éclairage des salles.'),
+      tg('hdPack', 'Pack de textures HD', "Remplace les textures d'origine par celles du dossier choisi."),
+      row({ label: 'Dossier du pack HD', desc: 'Les images y sont nommées par leur empreinte (voir le README).', disabled: !st.hdPack },
+        `<div class="mono" style="width:250px;height:34px;padding:0 10px;display:flex;align-items:center;background:#141414;border:1px solid #2e2e2e;border-radius:6px;font-size:11.5px;color:#c9c9c9;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">${esc(st.hdPath || 'Aucun dossier choisi')}</div>
+         <button class="btn sm" style="font-weight:400;" data-act="browseHd">Parcourir…</button>`)]],
+    ['JEU', [
+      tg('mods', 'Mod activé', 'Charge le mod installé au lancement du jeu.'),
+      tg('unlockAll', 'Tout débloquer', 'Personnages, lieux de combat et 10 000 points dès le départ.'),
+      tg('xboxPad', "Disposition de manette Xbox d'origine", 'LT/RT pour les gâchettes, LB/RB pour les boutons noir et blanc.')]]
+  ];
+  const d = dirty();
+  return `<div class="abs fade" style="display:flex;flex-direction:column;">
+    <div style="padding:30px 40px 18px;display:flex;align-items:baseline;gap:16px;"><h1 class="h1 cond">RÉGLAGES</h1><span style="color:#9a9a9a;font-size:13px;">Appliqués au prochain lancement du jeu.</span></div>
+    <div id="scroll" style="flex:1;overflow:auto;padding:0 40px 28px;"><div style="max-width:820px;display:flex;flex-direction:column;gap:22px;">
+      ${sections.map(([t, rows]) => `<section><div class="sect">${t}</div><div class="card">${rows.join('')}</div></section>`).join('')}
+    </div></div>
+    <div style="flex:none;display:flex;align-items:center;gap:10px;padding:14px 40px;background:#111111;border-top:1px solid #222;">
+      ${d ? `<span style="display:flex;align-items:center;gap:8px;font-size:13px;"><span style="width:7px;height:7px;border-radius:4px;background:#eeeeee;"></span>Modifications non enregistrées</span>
+        <button data-act="revert" style="height:30px;padding:0 10px;border:0;background:transparent;color:#9a9a9a;font-size:13px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;">Annuler</button>`
+        : '<span style="font-size:13px;color:#9a9a9a;">Tous les réglages sont enregistrés.</span>'}
+      <div style="flex:1;"></div>
+      <button class="btn" style="opacity:${d ? 1 : .5};" data-act="save">Enregistrer</button>
+      <button class="btn red" style="display:flex;align-items:center;gap:8px;" data-act="saveAndPlay">${I.play(13)}Enregistrer et jouer</button>
+    </div></div>`;
+}
+
+function mods() {
+  const m = S.mod, busy = S.modBusy;
+  const dropTxt = busy ? 'Installation en cours…' : S.modDrag ? (m ? `Relâchez pour remplacer « ${esc(m.name)} »` : 'Relâchez pour installer') : (m ? 'Déposez un fichier .mod ici pour remplacer le mod actuel' : "Déposez un fichier .mod ici pour l'installer");
+  const cover = c => c ? `<div class="abs" style="background:url('${c}') center/cover no-repeat;"></div>` : `<div class="abs stripes" style="display:flex;align-items:center;justify-content:center;"><span class="ph" style="font-size:10.5px;">COVER · 600×800</span></div>`;
+  let body;
+  if (!m && !busy) {
+    body = `<div class="drop ${S.modDrag ? 'over' : ''}" data-drop="mod" style="min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;border-radius:10px;">
+      <div class="stripes" style="width:320px;height:240px;border-radius:8px;display:flex;align-items:center;justify-content:center;"><span class="ph">ILLUSTRATION · 800×600</span></div>
+      <div class="cond" style="font-size:26px;margin-top:22px;">AUCUN MOD INSTALLÉ</div>
+      <div style="color:#9a9a9a;max-width:400px;margin-top:8px;line-height:1.5;">Les mods remplacent des personnages, des textures, des sons ou des modèles du jeu. Déposez un fichier .mod ici, ou choisissez-le sur votre ordinateur.</div>
+      <button class="btn light" style="margin-top:20px;" data-act="installMod">Choisir un fichier .mod</button></div>`;
+  } else {
+    const card = m && !busy ? `<div class="modcard"><div style="position:relative;aspect-ratio:3/4;">${cover(m.cover)}</div>
+        <div style="padding:12px 14px 14px;display:flex;flex-direction:column;gap:5px;flex:1;">
+          <div style="display:flex;align-items:baseline;gap:8px;"><span style="font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.name)}</span><span class="mono" style="font-size:11px;color:#9a9a9a;">v${esc(m.version)}</span></div>
+          <div style="color:#9a9a9a;font-size:12.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:36px;">${esc(m.desc)}</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;"><span style="flex:1;font-size:11.5px;color:#7a7a7a;">${esc(m.files)} fichiers · ${esc(m.date)}</span>
+          <button class="btn xs" style="height:26px;padding:0 10px;font-size:12px;color:#c9c9c9;" data-act="removeMod">Retirer</button></div></div></div>`
+      : `<div class="modcard"><div style="position:relative;aspect-ratio:3/4;">${cover('')}
+          <div class="abs" style="background:rgba(11,11,11,.72);display:flex;flex-direction:column;justify-content:flex-end;padding:14px;">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px;"><span>Installation…</span><span class="mono">${Math.round(busy.pct * 100)}%</span></div>
+          <div style="height:4px;border-radius:2px;background:#333;overflow:hidden;"><div style="height:100%;width:${Math.round(busy.pct * 100)}%;background:#eeeeee;transition:width .15s linear;"></div></div></div></div>
+          <div style="padding:12px 14px 14px;"><span style="font-weight:600;">${esc(busy.name || 'Nouveau mod')}</span></div></div>`;
+    body = `<div style="display:flex;flex-direction:column;gap:16px;">
+      <div class="drop ${S.modDrag ? 'over' : ''}" data-drop="mod" style="height:84px;display:flex;align-items:center;justify-content:center;gap:12px;border-radius:8px;color:#9a9a9a;font-size:13px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="15" x2="12" y2="4"/><polyline points="7.5,8.5 12,4 16.5,8.5"/><line x1="5" y1="20" x2="19" y2="20"/></svg><span>${dropTxt}</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(184px,1fr));gap:16px;">${card}</div></div>`;
+  }
+  return `<div class="abs fade" style="display:flex;flex-direction:column;" data-drop="mod">
+    <div style="padding:30px 40px 18px;display:flex;align-items:center;gap:16px;"><h1 class="h1 cond">MODS</h1>
+      <span style="color:#9a9a9a;font-size:13px;flex:1;">Un seul mod actif à la fois : en installer un nouveau remplace le précédent.${S.saved.mods ? '' : ' Mods désactivés dans Réglages.'}</span>
+      <button class="btn sm" style="display:flex;align-items:center;gap:8px;height:36px;" data-act="modsFolder">${I.folder}Ouvrir le dossier des mods</button>
+      <button class="btn light sm" style="display:flex;align-items:center;gap:8px;height:36px;font-weight:600;opacity:${busy ? .4 : 1};" data-act="installMod"><svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Installer un fichier .mod</button>
+    </div>
+    <div style="flex:1;overflow:auto;padding:0 40px 32px;">${body}</div></div>`;
+}
+
+function installPage() {
+  const other = S.build === 'msvc' ? 'Clang' : 'MSVC + DLSS';
+  const line = (k, v, act) => `<div style="padding:16px 18px;color:#9a9a9a;font-size:13px;${k !== 'Dossier' ? 'border-top:1px solid #232323;' : ''}">${k}</div>
+    <div style="padding:16px 0;${k !== 'Dossier' ? 'border-top:1px solid #232323;' : ''}overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${v}</div>
+    <div style="${k !== 'Dossier' ? 'border-top:1px solid #232323;' : ''}align-self:stretch;display:flex;align-items:center;padding:0 14px;">${act || ''}</div>`;
+  const action = (t, d, b) => `<div class="row" style="padding:16px 18px;"><div><div style="font-weight:600;">${t}</div><div class="desc">${d}</div></div>${b}</div>`;
+  return `<div class="abs fade" style="overflow:auto;padding:30px 40px 32px;"><h1 class="h1 cond" style="margin-bottom:22px;">INSTALLATION</h1>
+    <div style="max-width:820px;display:flex;flex-direction:column;gap:22px;">
+      <section><div class="sect">INSTALLATION ACTUELLE</div>
+        <div class="card" style="display:grid;grid-template-columns:150px minmax(0,1fr) auto;align-items:center;">
+          ${line('Dossier', `<span class="mono" style="font-size:12.5px;">${esc(S.installDir)}</span>`, '<button class="btn xs" data-act="gameFolder">Ouvrir</button>')}
+          ${line('Version', `<span style="font-weight:600;">${buildName()}</span><span style="color:#9a9a9a;">${S.gameVersion ? ' · ' + esc(S.gameVersion) : ''}${S.builtOn ? ' · compilée le ' + esc(S.builtOn) : ''}${S.gameSize ? ' · ' + esc(S.gameSize) : ''}</span>`)}
+          ${line('Image disque', `<span style="display:flex;align-items:center;gap:8px;">${I.check(15, GREEN, 2.6)}${esc(S.isoName || 'Def Jam: Fight for NY (USA)')} · vérifiée</span>`)}
+        </div></section>
+      <section><div class="sect">ACTIONS</div><div class="card">
+        ${action('Changer de version', S.build === 'msvc' ? 'Passer à Clang, tout compris : rien à installer, mais sans DLSS. Le jeu sera recompilé.' : 'Passer à MSVC + DLSS. Nécessite Visual Studio 2022 avec le C++. Le jeu sera recompilé.', `<button class="btn sm" style="font-weight:400;" data-act="askSwitch">Passer à ${other}</button>`)}
+        ${action('Réparer / réinstaller', 'Recompile le jeu depuis votre image disque. Vos réglages et votre mod sont conservés.', '<button class="btn sm" style="font-weight:400;" data-act="askRepair">Réparer</button>')}
+        ${action('Désinstaller', "Supprime le jeu recompilé et ses fichiers. Votre image disque n'est pas modifiée.", '<button class="btn sm danger" data-act="askUninstall">Désinstaller</button>')}
+      </div></section></div></div>`;
+}
+
+function wizard() {
+  const labels = ['Dossier', 'Version', 'Image disque', 'Installation'], pr = S.prog;
+  const stepper = labels.map((label, i) => {
+    const done = i < S.wizStep || (i === 3 && pr && pr.result === 'ok'), cur = i === S.wizStep && !done;
+    return `<div style="display:flex;align-items:center;gap:10px;flex:${i < 3 ? 1 : 'none'};"><div style="display:flex;align-items:center;gap:9px;">
+      <span style="width:24px;height:24px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:${done ? '#eeeeee' : 'transparent'};color:${done ? '#0b0b0b' : cur ? '#eeeeee' : '#6a6a6a'};border:1.5px solid ${done || cur ? '#eeeeee' : '#3a3a3a'};">${done ? I.check(12, 'currentColor', 3.4) : i + 1}</span>
+      <span style="font-size:13px;font-weight:600;color:${done || cur ? '#eeeeee' : '#6a6a6a'};white-space:nowrap;">${label}</span></div>
+      ${i < 3 ? `<span style="flex:1;height:1.5px;min-width:16px;background:${i < S.wizStep ? '#eeeeee' : '#2e2e2e'};"></span>` : ''}</div>`;
+  }).join('');
+  const h2 = t => `<h2 class="cond" style="margin:0;font-size:30px;">${t}</h2>`;
+  let body = '';
+  if (S.wizStep === 0) body = `${h2('OÙ INSTALLER LE JEU ?')}<p style="margin:6px 0 22px;color:#9a9a9a;line-height:1.5;">Le jeu est reconstruit à partir de votre propre disque. Aucun fichier du jeu n'est téléchargé.</p>
+      <label style="display:block;font-size:12px;color:#9a9a9a;font-weight:600;margin-bottom:8px;">Dossier d'installation</label>
+      <div style="display:flex;gap:8px;"><input id="dir" value="${esc(S.installDir)}" spellcheck="false" class="mono" style="flex:1;min-width:0;height:40px;padding:0 12px;background:#0f0f0f;color:#eeeeee;border:1px solid #2e2e2e;border-radius:6px;font-size:13px;outline:none;">
+        <button class="btn" style="height:40px;display:flex;align-items:center;gap:8px;background:#1b1b1b;font-weight:400;font-size:13px;" data-act="browseDir">${I.folder}Parcourir…</button></div>
+      <div style="display:flex;gap:24px;margin-top:16px;font-size:13px;"><div style="display:flex;align-items:center;gap:8px;">${S.freeSpace ? I.check(14, GREEN) : ''}<span>${esc(S.freeSpace)}</span></div><div style="color:#9a9a9a;">Espace requis : ${esc(S.required)}</div></div>
+      <div style="margin-top:14px;height:6px;border-radius:3px;background:#262626;overflow:hidden;display:flex;"><div style="width:${S.diskUsed};background:#5a5a5a;"></div><div style="width:2.5%;background:#eeeeee;"></div></div>`;
+  else if (S.wizStep === 1) {
+    const bc = k => `background:${S.build === k ? '#1f1f1f' : '#171717'};border:1.5px solid ${S.build === k ? '#eeeeee' : '#2a2a2a'};`;
+    const radio = k => `<span style="width:20px;height:20px;border-radius:10px;border:1.5px solid ${S.build === k ? '#eeeeee' : '#4a4a4a'};display:flex;align-items:center;justify-content:center;"><span style="width:10px;height:10px;border-radius:5px;background:${S.build === k ? '#eeeeee' : 'transparent'};"></span></span>`;
+    body = `${h2('CHOISISSEZ UNE VERSION')}<p style="margin:6px 0 22px;color:#9a9a9a;line-height:1.5;">Vous pourrez changer plus tard depuis la page Installation.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <button class="buildcard" style="${bc('clang')}" data-act="pickClang"><div style="display:flex;align-items:center;justify-content:space-between;width:100%;"><span style="font-size:11px;letter-spacing:.14em;font-weight:700;color:#0b0b0b;background:#eeeeee;padding:3px 8px;border-radius:3px;">RECOMMANDÉ</span>${radio('clang')}</div>
+          <div class="cond" style="font-size:26px;line-height:1;">Clang, tout compris</div><div style="display:flex;flex-direction:column;gap:7px;font-size:13px;color:#c9c9c9;"><span>Rien à installer</span><span>Téléchargement d'environ 106 Mo</span><span style="color:#9a9a9a;">Pas de DLSS</span></div></button>
+        <button class="buildcard" style="${bc('msvc')}" data-act="pickMsvc"><div style="display:flex;align-items:center;justify-content:space-between;width:100%;"><span style="font-size:11px;letter-spacing:.14em;font-weight:700;color:#9a9a9a;border:1px solid #3a3a3a;padding:2px 7px;border-radius:3px;">NVIDIA RTX</span>${radio('msvc')}</div>
+          <div class="cond" style="font-size:26px;line-height:1;">MSVC + DLSS</div><div style="display:flex;flex-direction:column;gap:7px;font-size:13px;color:#c9c9c9;"><span>Nécessite Visual Studio 2022 (C++)</span><span>DLSS / DLAA pour cartes NVIDIA RTX</span><span style="color:#9a9a9a;">Téléchargement d'environ 2 Mo</span></div></button>
+      </div>
+      ${S.build === 'msvc' ? `<div style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;animation:ffin .2s ease;">${S.vs ? I.check(14, GREEN) + esc(S.vs) + ' détecté' : `<span style="color:#ffb3bc;">Visual Studio 2022 avec le C++ n'est pas installé.</span>`}</div>` : ''}`;
+  } else if (S.wizStep === 2) {
+    const iso = S.iso, map = {
+      valid: { t: 'Def Jam: Fight for NY (USA)', d: 'Image valide. Version USA (NTSC-U) vérifiée.', b: 'oklch(0.45 0.09 150)', bg: GREEN, c: '#eeeeee', ok: 1 },
+      europe: { t: 'Version Europe détectée', d: 'Seule la version USA est prise en charge. Choisissez une autre image.', b: 'oklch(0.42 0.12 22)', bg: ERR, c: '#ffb3bc' },
+      other: { t: 'Version non prise en charge', d: "Ce n'est pas la version USA de Def Jam: Fight for NY. Choisissez une autre image.", b: 'oklch(0.42 0.12 22)', bg: ERR, c: '#ffb3bc' },
+      unreadable: { t: 'Fichier illisible', d: "Le fichier est incomplet, corrompu ou n'est pas une image de disque Xbox.", b: 'oklch(0.42 0.12 22)', bg: ERR, c: '#ffb3bc' } };
+    const r = iso && map[iso.status];
+    body = `${h2('IMAGE DU DISQUE')}<p style="margin:6px 0 20px;color:#9a9a9a;line-height:1.5;">Sélectionnez l'image .iso de votre disque Xbox. Seule la version USA est prise en charge.</p>
+      <div class="drop" data-drop="iso" data-act="pickIso" style="height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-color:${S.isoDrag ? '#eeeeee' : '#333333'};border-radius:10px;background:${S.isoDrag ? 'rgba(255,255,255,.05)' : '#111111'};cursor:pointer;">
+        ${S.isoChecking ? `${spin(18)}<span style="font-size:13px;color:#c9c9c9;">Analyse de l'image…</span>` : `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#9a9a9a" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg><div style="font-size:14px;"><span style="font-weight:600;">Déposez un fichier .iso ici</span><span style="color:#9a9a9a;"> ou cliquez pour parcourir</span></div>`}</div>
+      ${r && !S.isoChecking ? `<div style="display:flex;align-items:flex-start;gap:12px;margin-top:14px;padding:14px 16px;border-radius:8px;background:#1b1b1b;border:1px solid ${r.b};animation:ffin .2s ease;">
+        <span style="width:26px;height:26px;flex:none;border-radius:13px;display:flex;align-items:center;justify-content:center;background:${r.bg};color:#0b0b0b;">${r.ok ? I.check(14, 'currentColor', 3.4) : I.cross(12, 3.6)}</span>
+        <div style="flex:1;min-width:0;"><div style="font-weight:600;color:${r.c};">${r.t}</div><div style="color:#9a9a9a;font-size:12.5px;margin-top:3px;line-height:1.45;">${r.d}</div>
+        <div class="mono" style="font-size:11.5px;color:#7a7a7a;margin-top:6px;word-break:break-all;">${esc(iso.file)} · ${esc(iso.size)}</div></div></div>` : ''}`;
+  } else if (pr) {
+    const run = !pr.result, rem = pr.pct > 0.02 ? mmss(pr.elapsed / pr.pct * (1 - pr.pct)) : '—';
+    if (run) body = `<div style="display:flex;align-items:flex-end;gap:16px;"><div style="flex:1;min-width:0;"><div style="font-size:12px;color:#9a9a9a;font-weight:600;">Étape ${pr.step + 1} sur 6</div><h2 class="cond" style="margin:4px 0 0;font-size:30px;">${STEPS[pr.step]}…</h2></div>
+        <div class="cond" style="font-size:40px;line-height:1;font-variant-numeric:tabular-nums;">${Math.round(pr.pct * 100)}%</div></div>
+      <div style="height:6px;border-radius:3px;background:#262626;overflow:hidden;margin-top:14px;"><div style="height:100%;width:${Math.round(pr.pct * 100)}%;background:#eeeeee;transition:width .12s linear;"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:#9a9a9a;font-variant-numeric:tabular-nums;"><span>Temps écoulé ${mmss(pr.elapsed)}</span><span>Restant environ ${rem}</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;margin-top:20px;">${STEPS.map((l, i) => {
+        const done = i < pr.step, cur = i === pr.step;
+        return `<div style="display:flex;align-items:center;gap:10px;height:26px;font-size:13px;color:${done ? '#c9c9c9' : cur ? '#eeeeee' : '#6a6a6a'};"><span style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;flex:none;">${done ? I.check(15, GREEN, 3) : cur ? spin(13) : '<span style="width:8px;height:8px;border-radius:4px;border:1.5px solid #4a4a4a;"></span>'}</span>
+          <span style="flex:1;font-weight:${cur ? 600 : 400};">${l}</span><span class="mono" style="font-size:11px;color:#7a7a7a;">${cur ? Math.round(pr.stepPct * 100) + ' %' : ''}</span></div>`; }).join('')}</div>`;
+    else if (pr.result === 'ok') body = `<div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:10px 0 4px;animation:ffin .3s ease;">
+        <span style="width:56px;height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;background:${GREEN};color:#0b0b0b;">${I.check(28, 'currentColor', 3)}</span>
+        <h2 class="cond" style="margin:18px 0 0;font-size:38px;">LE JEU EST PRÊT</h2><div style="color:#9a9a9a;margin-top:6px;">Recompilé en ${mmss(pr.elapsed)} · ${buildName()}${S.gameSize ? ' · ' + esc(S.gameSize) : ''}</div>
+        <button class="play cond" style="margin-top:24px;height:56px;min-width:220px;font-size:24px;" data-act="finish">${I.play(18)}JOUER</button></div>`;
+    else body = `<div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:10px 0 4px;animation:ffin .3s ease;">
+        <span style="width:56px;height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;background:${ERR};color:#0b0b0b;">${I.cross(22, 3.4)}</span>
+        <h2 class="cond" style="margin:18px 0 0;font-size:38px;">L'INSTALLATION A ÉCHOUÉ</h2><div style="color:#9a9a9a;margin-top:6px;">L'installation s'est arrêtée à l'étape ${(pr.failStep != null ? pr.failStep : pr.step) + 1} sur 6. Votre image disque n'a pas été modifiée.</div>
+        ${pr.error ? `<div class="mono" style="margin-top:12px;padding:8px 12px;border-radius:6px;background:#0f0f0f;border:1px solid #2a2a2a;font-size:12px;color:#ff9aa6;user-select:text;">${esc(pr.error)}</div>` : ''}
+        <div style="display:flex;gap:10px;margin-top:22px;"><button class="btn" style="height:40px;" data-act="log">Ouvrir le journal</button><button class="btn light" style="height:40px;" data-act="retry">Réessayer</button></div></div>`;
+    body += `<div style="margin-top:20px;border:1px solid #242424;border-radius:8px;overflow:hidden;">
+      <button data-act="toggleLog" style="width:100%;height:38px;display:flex;align-items:center;gap:8px;padding:0 14px;border:0;background:#181818;color:#c9c9c9;font-size:12.5px;cursor:pointer;text-align:left;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(${S.logOpen ? 0 : -90}deg);transition:transform .18s;"><polyline points="6,9 12,15 18,9"/></svg>
+        <span style="flex:1;">${S.logOpen ? 'Masquer le journal' : 'Afficher le journal'}</span><span class="mono" style="font-size:11px;color:#6a6a6a;">${pr.log.length} lignes</span></button>
+      ${S.logOpen ? `<div id="log" class="mono" style="height:150px;overflow:auto;padding:10px 14px;background:#0c0c0c;font-size:11.5px;line-height:1.65;user-select:text;">${pr.log.slice(-400).map(l => `<div style="display:flex;gap:12px;"><span style="color:#555;">${l.time}</span><span style="color:${l.level === 'error' ? '#ff9aa6' : '#b5b5b5'};white-space:pre-wrap;word-break:break-all;">${esc(l.text)}</span></div>`).join('')}</div>` : ''}</div>`;
+  }
+  const running = S.wizStep === 3 && pr && !pr.result;
+  const showFooter = !(pr && pr.result && S.wizStep === 3);
+  const nextOff = (S.wizStep === 2 && !(S.iso && S.iso.status === 'valid')) || (S.wizStep === 1 && S.build === 'msvc' && !S.vs);
+  const note = running ? `${buildName()} · ${esc(S.installDir)}` : ['Étape 1 sur 4', 'Étape 2 sur 4', 'Étape 3 sur 4', ''][S.wizStep];
+  return `<div class="abs">${heroBg('INSTALLER BACKGROUND · 2560×1440')}
+    <div class="abs" style="background:radial-gradient(ellipse at center,rgba(11,11,11,.55) 0%,rgba(11,11,11,.9) 75%);"></div>
+    <div class="abs" style="display:flex;align-items:center;justify-content:center;padding:28px;">
+      <div style="width:100%;max-width:700px;max-height:100%;display:flex;flex-direction:column;background:rgba(20,20,20,.94);backdrop-filter:blur(14px);border:1px solid #262626;border-radius:12px;box-shadow:0 30px 80px -20px rgba(0,0,0,.8);overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:10px;padding:20px 28px;border-bottom:1px solid #222;">${stepper}</div>
+        <div style="flex:1;overflow:auto;padding:28px;"><div class="${S.wizStep < 3 ? 'fade' : ''}">${body}</div></div>
+        ${showFooter ? `<div style="display:flex;align-items:center;gap:10px;padding:16px 28px;border-top:1px solid #222;background:#121212;">
+          <span style="flex:1;font-size:12.5px;color:#9a9a9a;">${note}</span>
+          ${S.wizStep > 0 && S.wizStep < 3 ? '<button class="btn" data-act="back">Retour</button>' : ''}
+          ${S.wizStep < 3 ? `<button class="btn light" style="opacity:${nextOff ? .35 : 1};" data-act="next">${S.wizStep === 2 ? "Lancer l'installation" : 'Suivant'}</button>` : ''}
+          ${running ? '<button class="btn" data-act="askCancel">Annuler</button>' : ''}</div>` : ''}
+      </div></div></div>`;
+}
+
+function overlays() {
+  let h = `<div style="position:absolute;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:30;pointer-events:none;">${S.toasts.map(t => {
+    const e = t.kind === 'error';
+    return `<div style="pointer-events:auto;width:340px;display:flex;align-items:flex-start;gap:10px;padding:12px 12px 12px 14px;background:#1f1f1f;border:1px solid ${e ? 'oklch(0.4 0.11 22)' : '#2e2e2e'};border-radius:8px;box-shadow:0 12px 30px -8px rgba(0,0,0,.7);animation:ffin .25s ease;">
+      <span style="width:18px;height:18px;flex:none;border-radius:9px;margin-top:1px;display:flex;align-items:center;justify-content:center;background:${e ? ERR : GREEN};color:#0b0b0b;">${e ? I.cross(9, 4.5) : I.check(10, 'currentColor', 4)}</span>
+      <div style="flex:1;min-width:0;font-size:13px;line-height:1.45;"><div style="font-weight:600;">${esc(t.title)}</div><div style="color:#9a9a9a;margin-top:2px;user-select:text;">${esc(t.text)}</div></div>
+      <button class="icobtn" style="width:22px;height:22px;border-radius:4px;color:#7a7a7a;" data-act="closeToast" data-id="${t.id}">${I.cross(11, 2.6)}</button></div>`; }).join('')}</div>`;
+  if (S.modal) {
+    const m = S.modal;
+    h += `<div class="overlay" data-act="closeModal"><div class="dialog" data-stop="1" style="width:440px;padding:24px;">
+      <div class="cond" style="font-size:24px;line-height:1.1;">${esc(m.title)}</div><div style="color:#9a9a9a;margin-top:10px;line-height:1.55;">${esc(m.body)}</div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:24px;"><button class="btn" data-act="closeModal">${esc(m.cancel || 'Annuler')}</button>
+      <button class="btn ${m.danger ? 'red' : 'light'}" data-act="confirmModal">${esc(m.confirm)}</button></div></div></div>`;
+  }
+  if (S.about) {
+    h += `<div class="overlay" data-act="closeAbout"><div class="dialog" data-stop="1" style="width:520px;max-height:calc(100% - 48px);overflow:auto;">
+      <div style="display:flex;align-items:center;gap:16px;padding:24px 24px 18px;">
+        <img src="https://djffny.local/icone.png" alt="" onerror="this.removeAttribute('src')" style="width:64px;height:64px;flex:none;border-radius:14px;background:repeating-linear-gradient(135deg,#2a2a2a 0 6px,#222 6px 12px);">
+        <div style="flex:1;"><div class="cond" style="font-size:24px;line-height:1;">FIGHT FOR NY — RECOMPILED</div><div class="mono" style="color:#9a9a9a;font-size:12.5px;margin-top:6px;">Launcher v${esc(S.version)}${S.installed ? ' · ' + buildName() : ''}</div></div>
+        <button class="icobtn" style="width:30px;height:30px;align-self:flex-start;" data-act="closeAbout">${I.cross(13)}</button></div>
+      <div style="padding:0 24px;color:#c9c9c9;line-height:1.55;font-size:13px;">Port PC non officiel, réalisé par des fans. Ce projet n'est affilié ni à Electronic Arts, ni à Def Jam Recordings, ni à AKI Corporation. Aucun fichier du jeu n'est distribué : le jeu est reconstruit à partir de votre propre image disque.</div>
+      <div class="sect" style="margin:22px 24px 8px;">LICENCES</div>
+      <div style="margin:0 24px;border:1px solid #262626;border-radius:8px;">${S.licences.map(([n, l], i) => `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;${i ? 'border-top:1px solid #262626;' : ''}font-size:13px;"><span style="flex:1;">${esc(n)}</span><span class="mono" style="font-size:11.5px;color:#9a9a9a;">${esc(l)}</span></div>`).join('')}</div>
+      <div style="display:flex;gap:10px;padding:20px 24px 24px;"><button class="btn sm" style="font-weight:400;height:36px;" data-act="repo">Code source</button><button class="btn sm" style="font-weight:400;height:36px;" data-act="licences">Textes complets des licences</button></div></div></div>`;
+  }
+  return h;
+}
+
+function render() {
+  const app = document.getElementById('app');
+  const sc = document.getElementById('scroll'), top = sc ? sc.scrollTop : 0;
+  const scr = !S.ready ? '' : S.screen === 'home' ? home() : S.screen === 'settings' ? settings() : S.screen === 'mods' ? mods() : S.screen === 'install' ? installPage() : wizard();
+  app.innerHTML = `<div class="app">${sidebar()}<main>${scr}${overlays()}</main></div>`;
+  const sc2 = document.getElementById('scroll'); if (sc2) sc2.scrollTop = top;
+  const log = document.getElementById('log'); if (log) log.scrollTop = log.scrollHeight;
+}
+
+// ---------- evenements ----------
+document.addEventListener('click', e => {
+  const stop = e.target.closest('[data-stop]'), el = e.target.closest('[data-act],[data-toggle],[data-seg]');
+  if (!el) return;
+  if (stop && !stop.contains(el)) return;
+  if (stop && el.classList.contains('overlay')) return;
+  if (el.dataset.toggle) return setS(el.dataset.toggle, !S.settings[el.dataset.toggle]);
+  if (el.dataset.seg) return setS(el.dataset.seg, el.dataset.v);
+  const f = A[el.dataset.act]; if (f) f(el);
+});
+document.addEventListener('change', e => { if (e.target.dataset.select) setS(e.target.dataset.select, +e.target.value); });
+document.addEventListener('input', e => { if (e.target.id === 'dir') S.installDir = e.target.value; });
+document.addEventListener('change', e => { if (e.target.id === 'dir') send({ type: 'checkFolder', path: S.installDir }); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') set({ modal: null, about: false }); });
+document.addEventListener('dragover', e => {
+  e.preventDefault(); const z = e.target.closest('[data-drop]'); if (!z) return;
+  if (z.dataset.drop === 'mod' && !S.modDrag) set({ modDrag: true });
+  if (z.dataset.drop === 'iso' && !S.isoDrag) set({ isoDrag: true });
+});
+document.addEventListener('dragleave', e => { if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest('[data-drop]')) { if (S.modDrag || S.isoDrag) set({ modDrag: false, isoDrag: false }); } });
+document.addEventListener('drop', e => {
+  e.preventDefault(); const z = e.target.closest('[data-drop]'), files = [...(e.dataTransfer && e.dataTransfer.files || [])];
+  set({ modDrag: false, isoDrag: false });
+  if (!z || !files.length) return;
+  if (files.length > 1) toast('error', 'Un seul fichier à la fois', `Seul « ${files[0].name} » sera pris.`);
+  if (z.dataset.drop === 'iso') { set({ isoChecking: true }); send({ type: 'pickIso', dropped: true }, [files[0]]); }
+  else installMod([files[0]]);
+});
+
+render();
+send({ type: 'getState' });
+
+// ---------- simulation, sans hote (navigateur) ----------
+function simuler(msg) {
+  const r = (m, ms = 300) => setTimeout(() => onHost(m), ms);
+  switch (msg.type) {
+    case 'getState': return r({ type: 'state', state: { installed: false, freeSpace: '214 Go libres sur C:', diskUsed: '58%', vs: 'Visual Studio Community 2022 17.12', version: '1.1.0',
+      licences: [['Ce port (lanceur et runtime)', 'MIT'], ['Toolkit xboxrecomp', 'MIT, LGPL-2.1'], ['Microsoft WebView2', 'Microsoft']] } }, 50);
+    case 'browseFolder': return r({ type: 'folderPicked', path: 'D:\\Jeux\\DefJam-FFNY', free: '1,2 To libres sur D:', used: '31%' }, 300);
+    case 'pickIso': return r({ type: 'isoChecked', status: 'valid', file: 'D:\\ISO\\Def Jam - Fight for NY (USA).iso', size: '6,95 Go' }, 800);
+    case 'startInstall': {
+      let p = 0; const iv = setInterval(() => { p += 0.01; const step = Math.min(5, Math.floor(p * 6));
+        onHost({ type: 'installProgress', step, stepPct: (p * 6) % 1, pct: Math.min(p, 1), elapsed: p * 600, line: Math.random() < 0.2 ? 'ligne de journal simulée' : null });
+        if (p >= 1) { clearInterval(iv); onHost({ type: 'installDone', ok: true, size: '3,1 Go' }); } }, 60); return;
+    }
+    case 'launch': r({ type: 'gameStarted' }, 300); return r({ type: 'gameExited' }, 4000);
+    case 'saveSettings': return r({ type: 'settingsSaved' }, 100);
+    case 'installMod': { let p = 0; const iv = setInterval(() => { p += 0.1; onHost({ type: 'modProgress', name: 'Def Jam Vendetta', pct: Math.min(p, 1) });
+      if (p >= 1) { clearInterval(iv); onHost({ type: 'mod', mod: { name: 'Def Jam Vendetta', version: '2026-10-30', desc: 'Les 44 combattants de Def Jam Vendetta (PS2).', files: 1879, date: '30/10/2026' } }); } }, 120); return; }
+    case 'removeMod': return r({ type: 'mod', mod: null });
+    case 'uninstall': return r({ type: 'uninstalled' }, 500);
+    default: return r({ type: 'info', title: msg.type, text: JSON.stringify(msg) }, 100);
+  }
+}
+</script>
+</body>
+</html>

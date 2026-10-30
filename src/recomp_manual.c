@@ -29,6 +29,8 @@
 /* Register model + MEM32/XBOX_PTR/PUSH32 macros, so hand-written functions
  * below read the guest stack exactly the way generated code does. */
 #include "recomp/gen/recomp_types.h"
+#include "autopilote.h"        /* manette 1 scriptee, essais sans joueur */
+#include "dsound_hle.h"        /* DirectSound en haut niveau (toolkit) */
 
 /* ── ICALL trace ring buffer ───────────────────────────────── */
 
@@ -153,38 +155,6 @@ static void guard_arm(jmp_buf *j)
  * 0x00201954) that no dispatch entry can satisfy. Every memcpy whose size
  * hit one of those tails silently copied nothing, which is how the BIG4
  * archive loader went wrong right after opening assets\misc.viv. */
-/* DirectSound copies to and from the APU's register window, which is left
- * unmapped so each access faults into the emulated APU. The fault handler
- * decodes plain `mov` only, and the host memcpy moves 32 bytes at a time with
- * AVX -- so such a copy crashed the title in the main menu once sound effects
- * started. Those copies go a dword (then a byte) at a time instead. */
-static int apu_window_hit(uint32_t va, uint32_t n)
-{
-    return (uint64_t)va + n > 0xFE800000u && va < 0xFE880000u;
-}
-
-static __declspec(noinline) void mmio_safe_move(uint32_t dst, uint32_t src, uint32_t n)
-{
-    volatile uint32_t w;
-    volatile uint8_t b;
-    uint32_t i = 0;
-    if (dst > src && dst < src + n) {          /* overlapping: backwards */
-        while (n--) {
-            b = MEM8(src + n);
-            MEM8(dst + n) = b;
-        }
-        return;
-    }
-    for (; i + 4 <= n; i += 4) {
-        w = MEM32(src + i);
-        MEM32(dst + i) = w;
-    }
-    for (; i < n; i++) {
-        b = MEM8(src + i);
-        MEM8(dst + i) = b;
-    }
-}
-
 void sub_002016B0(void)
 {
     /* The eax/esp aliases are only defined for generated code
@@ -193,54 +163,18 @@ void sub_002016B0(void)
     uint32_t src = MEM32(g_esp + 8);
     uint32_t n   = MEM32(g_esp + 12);
 
-    if (n && (apu_window_hit(dst, n) || apu_window_hit(src, n)))
-        mmio_safe_move(dst, src, n);
-    else if (n)
+    if (n)
         memmove((void *)XBOX_PTR(dst), (const void *)XBOX_PTR(src), n);
     g_eax = dst;
     g_esp += 4; return;
 }
 
-/* ── Audio DSP command acknowledgement ──────────────────────────
- *
- * DirectSound's DSP upload (sub_0025F394, DSOUND section) ends with:
- *
- *     mov  [ebx+0x810], eax     ; hand the command block to the GP DSP
- *     cmp  [ebx+0x810], 0
- *     jne  $-2                   ; spin until the DSP has taken it
- *
- * On hardware the audio DSP clears that word when it consumes the command.
- * xbox_apu emulates the voice processor but stubs both DSP cores, so nothing
- * ever clears it and the main thread spins there forever -- which is the hang
- * the toolkit's own note about RECOMP_AC97_READY predicts ("DirectSound hands
- * the audio DSP a command block in RAM and spins until the DSP clears it").
- *
- * Acknowledging it from the host is the same claim the NV2A busy-bit thread
- * makes for the GPU: the work is not queued anywhere, so reporting it as
- * consumed is the honest answer, and it is what lets audio init finish.
- *
- * The address is not fixed -- the block is allocated -- so it is read out of
- * the guest object on the way into the function, which is the only place the
- * chain is known.
- *
- * ponytail: no sound is produced by this path. The DSP program is discarded,
- * not run. Voices that DirectSound drives through APU MMIO still reach the
- * emulated voice processor.
- */
-#define DSP_ACK_SLOTS 4
-static volatile LONG  g_dsp_ack_count;
-static volatile ULONG g_dsp_ack_self[DSP_ACK_SLOTS];  /* guest `this` pointers */
-static volatile LONG  g_dsp_ack_started;
-
-/* Guest reads from a polling thread have to be bounds-checked. The chain below
- * is followed while the title is still building it, so an intermediate word can
- * be anything at all, and MEM32 on a wild value faults in the host rather than
- * in the title.
- *
- * The two ranges are the only ones this chain can legitimately land in: main
- * RAM, and the contiguous window that mirrors it. Masking the top nibble
- * instead of testing the ranges accepted addresses like 0x40000000, which is
- * mapped nowhere. */
+/* Lire la memoire invitee en suivant des pointeurs que le titre est peut-etre
+ * encore en train de construire : un mot intermediaire peut valoir n'importe
+ * quoi, et MEM32 sur une valeur folle faute dans l'hote plutot que dans le
+ * titre. Seules la RAM et sa fenetre contigue sont lisibles ; masquer le
+ * quartet haut acceptait des adresses comme 0x40000000, mappees nulle part.
+ * (Ne d'un acquittement des commandes du DSP, parti avec l'APU.) */
 static int dsp_readable(uint32_t va)
 {
     if (va >= 0x00010000u && (uint64_t)va + 4 <= 0x04000000u)
@@ -250,267 +184,62 @@ static int dsp_readable(uint32_t va)
     return 0;
 }
 
-/* The value sub_0025F394 writes to hand the block over:
+/* ── DirectSound en haut niveau ─────────────────────────────────────────────
  *
- *     push 3 ; pop eax ; ... ; mov [ebx+0x810], eax ; cmp [ebx+0x810],0 ; jne $-2
- *
- * Clearing only that exact value is what keeps this from corrupting the title.
- * An earlier version cleared any non-zero word the chain resolved to, and the
- * chain does not stay pointing at the same object -- so it zeroed live data and
- * produced a repeatable crash in D3D a few seconds later. */
-#define DSP_COMMAND_PENDING 3u
+ * Les 21 points d'entree de DSOUND que le jeu appelle (GUIDE_FR.md, points 166
+ * et 167) vont a la couche DirectSound du toolkit (src/dsound_hle), qui rend
+ * le son sans l'APU. Le reste de la bibliotheque d'origine ne tourne plus. */
+void sub_0025C96E(void) { dsound_hle_DirectSoundCreate(); }
+void sub_0025C9B5(void) { dsound_hle_DirectSoundCreateBuffer(); }
+void sub_00256E61(void) { dsound_hle_IDirectSound_Release(); }
+void sub_0025C620(void) { dsound_hle_IDirectSound_CreateSoundBuffer(); }
+void sub_0025917D(void) { dsound_hle_IDirectSound_SetMixBinHeadroom(); }
+void sub_002590D1(void) { dsound_hle_IDirectSound_DownloadEffectsImage(); }
+void sub_0025C7A8(void) { dsound_hle_IDirectSound_SetI3DL2Listener(); }
+void sub_00256E97(void) { dsound_hle_IDirectSoundBuffer_Release(); }
+void sub_0025B15D(void) { dsound_hle_IDirectSoundBuffer_SetMixBins(); }
+void sub_00259307(void) { dsound_hle_IDirectSoundBuffer_SetMixBinVolumes(); }
+void sub_002592B3(void) { dsound_hle_IDirectSoundBuffer_SetEG(); }
+void sub_002592CF(void) { dsound_hle_IDirectSoundBuffer_SetFilter(); }
+void sub_0025B125(void) { dsound_hle_IDirectSoundBuffer_SetFrequency(); }
+void sub_0025BB3D(void) { dsound_hle_IDirectSoundBuffer_SetBufferData(); }
+void sub_002593E7(void) { dsound_hle_IDirectSoundBuffer_SetLoopRegion(); }
+void sub_00259443(void) { dsound_hle_IDirectSoundBuffer_SetCurrentPosition(); }
+void sub_00259323(void) { dsound_hle_IDirectSoundBuffer_Play(); }
+void sub_002593A7(void) { dsound_hle_IDirectSoundBuffer_Pause(); }
+void sub_00259383(void) { dsound_hle_IDirectSoundBuffer_StopEx(); }
+void sub_00259407(void) { dsound_hle_IDirectSoundBuffer_GetStatus(); }
+void sub_00259423(void) { dsound_hle_IDirectSoundBuffer_GetCurrentPosition(); }
 
-/* The other command on the same word. sub_0025F530 waits for the word to read
- * zero, then posts 2 and returns without waiting -- so the command is only
- * noticed by its next call, which spins forever if nothing clears it. Def Jam
- * posts it rarely: the first time is fine, the second (the end of a fight)
- * hung the game. It is cleared only at an address already proven to be the
- * command word during an upload, only while the chain still leads there, and
- * only when it holds exactly 2. */
-#define DSP_COMMAND_UPDATE 2u
-
-/* Resolve *(*(this + 8) + 0x10) + 0x810, the word sub_0025F394 spins on. */
-static uint32_t dsp_command_word(uint32_t self)
+static recomp_func_t son_hle_porte(uint32_t va)
 {
-    uint32_t p;
-
-    if (!dsp_readable(self + 8))         return 0;
-    p = MEM32(self + 8);
-    if (!dsp_readable(p + 0x10))         return 0;
-    p = MEM32(p + 0x10);
-    if (!dsp_readable(p))                return 0;
-    p = MEM32(p);
-    if (!dsp_readable(p + 0x810))        return 0;
-    return p + 0x810;
-}
-
-/* Non-zero only while a guest thread is inside sub_0025F394. Outside that
- * window there is no command to acknowledge and the object may be anything, so
- * the thread does not touch guest memory at all. */
-static volatile LONG g_dsp_in_upload;
-
-static DWORD WINAPI dsp_ack_thread(LPVOID unused)
-{
-    static uint32_t announced[DSP_ACK_SLOTS];
-    ULONGLONG busy_until = 0;
-    (void)unused;
-
-    for (;;) {
-        LONG n = g_dsp_ack_count, i;
-
-        /* Outside an upload: the posted-and-forgotten command 2. */
-        for (i = 0; i < n; i++) {
-            uint32_t va = announced[i];
-            if (va && dsp_command_word((uint32_t)g_dsp_ack_self[i]) == va
-                    && MEM32(va) == DSP_COMMAND_UPDATE) {
-                static int said;
-                MEM32(va) = 0;
-                busy_until = GetTickCount64() + 200;
-                if (!said++) {
-                    fprintf(stderr, "  [DSOUND] DSP update command at 0x%08X "
-                            "acknowledged by the host\n", va);
-                    fflush(stderr);
-                }
-            }
-        }
-
-        if (InterlockedCompareExchange(&g_dsp_in_upload, 0, 0) > 0) {
-            for (i = 0; i < n; i++) {
-                /* Re-resolved every tick rather than captured once. The chain
-                 * is not complete when the function is entered -- the title
-                 * fills it in as it builds the buffer -- and a single read at
-                 * entry gave up on exactly the runs where the object was still
-                 * being constructed, leaving the guest spinning forever. */
-                uint32_t va = dsp_command_word((uint32_t)g_dsp_ack_self[i]);
-                if (!va || MEM32(va) != DSP_COMMAND_PENDING)
-                    continue;
-                if (announced[i] != va) {
-                    announced[i] = va;
-                    fprintf(stderr, "  [DSOUND] DSP command word at 0x%08X "
-                            "acknowledged by the host (no DSP emulation)\n", va);
-                    fflush(stderr);
-                }
-                MEM32(va) = 0;
-            }
-            busy_until = GetTickCount64() + 200;
-        }
-        /* A waiter spins on another core, so answer fast while commands are
-         * flowing; otherwise do not hold a core for nothing. */
-        if (GetTickCount64() < busy_until)
-            Sleep(0);
-        else
-            Sleep(1);
-    }
-}
-
-static void dsp_ack_register(uint32_t self)
-{
-    LONG n, i;
-
-    if (!self)
-        return;
-    n = g_dsp_ack_count;
-    for (i = 0; i < n; i++)
-        if ((uint32_t)g_dsp_ack_self[i] == self)
-            return;                      /* already watched */
-    if (n >= DSP_ACK_SLOTS)
-        return;
-    g_dsp_ack_self[n] = self;
-    InterlockedIncrement(&g_dsp_ack_count);
-
-    if (InterlockedCompareExchange(&g_dsp_ack_started, 1, 0) == 0)
-        CreateThread(NULL, 0, dsp_ack_thread, NULL, 0, NULL);
-}
-
-/* DSOUND DSP upload at 0x0025F394. The generated body still runs -- it does
- * the relocation and the copies -- but the object it will spin on is handed to
- * the acknowledging thread first, so the spin ends. `this` arrives in ecx
- * (thiscall), which is all the thread needs: it walks the same chain the
- * function's own prologue walks, and keeps walking it until it resolves. */
-extern void sub_0025F394_gen(void);
-
-void sub_0025F394(void)
-{
-    dsp_ack_register(g_ecx);
-    InterlockedIncrement(&g_dsp_in_upload);
-    sub_0025F394_gen();
-    InterlockedDecrement(&g_dsp_in_upload);
-}
-
-/* IDirectSoundBuffer::GetCurrentPosition at 0x0026415B.
- *
- * It reads the buffer's voice object through [this+0x80] and then follows it:
- *
- *     mov ecx, [esi+0x80] ; mov ecx, [ecx+0x14]
- *
- * With audio initialisation now completing every run, the title reaches this
- * with [this+0x80] holding something that is not a guest pointer at all
- * (0xC2030000 in every observed case), and the runtime faults following it.
- * The value comes from CreateSoundBuffer, which takes it from the device
- * object, so the real defect is upstream in DirectSound's own construction --
- * this does not fix that.
- *
- * What it does is refuse to follow a pointer that cannot be one, report a
- * position of zero, and return success, which is what a buffer that has not
- * started playing would report anyway. The title carries on instead of the
- * process dying, and the bad pointer is logged once so the upstream bug stays
- * visible rather than being quietly papered over.
- *
- * Remove this the moment CreateSoundBuffer is understood.
- */
-extern void sub_0026415B_gen(void);
-
-void sub_0026415B(void)
-{
-    uint32_t self = g_ecx;
-    uint32_t voice = dsp_readable(self + 0x80) ? MEM32(self + 0x80) : 0;
-
-    /* Experiment, opt-in through RECOMP_DS_FAKE_CURSOR.
-     *
-     * The APU's DSP cores are stubbed, so nothing consumes a sound buffer and
-     * its play cursor never moves. A title that waits for playback to progress
-     * would wait forever, and this says whether Def Jam is one: it reports a
-     * cursor advancing at CD rate instead of asking the buffer. If the title
-     * gets further with this on, the answer is to make the APU actually play;
-     * if it does not, audio progress was never what it was waiting for.
-     *
-     * Not a fix, and deliberately not on by default: a title that trusts this
-     * cursor to know how much data to write would be misled by it. */
-    if (voice && dsp_readable(voice + 0xC0) && getenv("RECOMP_DS_FAKE_CURSOR")) {
-        uint32_t size = MEM32(voice + 0xC0);
-        if (size >= 0x400u && size <= 0x1000000u) {
-            uint32_t play_out  = MEM32(g_esp + 4);
-            uint32_t write_out = MEM32(g_esp + 8);
-            /* 176 bytes per millisecond is 44.1 kHz, 16-bit, stereo. */
-            uint32_t pos = (uint32_t)((uint64_t)GetTickCount64() * 176u % size);
-            if (dsp_readable(play_out))  MEM32(play_out)  = pos;
-            if (dsp_readable(write_out)) MEM32(write_out) = (pos + 2048u) % size;
-            g_eax = 0;
-            g_esp += 4 + 8;
-            return;
-        }
-    }
-
-    if (!voice || !dsp_readable(voice + 0x14)) {
-        uint32_t play_out  = MEM32(g_esp + 4);
-        uint32_t write_out = MEM32(g_esp + 8);
-        static uint32_t seen[4];
-        static unsigned n_seen;
-        unsigned i;
-
-        for (i = 0; i < n_seen && seen[i] != voice; i++) { }
-        if (i == n_seen && n_seen < 4) {
-            seen[n_seen++] = voice;
-            fprintf(stderr, "  [DSOUND] GetCurrentPosition: buffer 0x%08X has "
-                    "voice 0x%08X, which is not a guest pointer -- reporting "
-                    "position 0\n", self, voice);
-            fflush(stderr);
-        }
-        if (dsp_readable(play_out))  MEM32(play_out)  = 0;
-        if (dsp_readable(write_out)) MEM32(write_out) = 0;
-        g_eax = 0;                  /* DS_OK */
-        g_esp += 4 + 8;             /* ret 8 */
-        return;
-    }
-
-    /* What the title is told about playback progress, once a second.
-     *
-     * It decides where it may write from this. The APU prints the voice's real
-     * read offset at the same cadence, so the two lines together say whether
-     * the title is writing into the stretch we are reading -- which is what a
-     * click in the middle of a buffer sounds like. */
-    {
-        uint32_t play_out  = MEM32(g_esp + 4);
-        uint32_t write_out = MEM32(g_esp + 8);
-
-        sub_0026415B_gen();
-
-        if (getenv("RECOMP_APU_TRACE")) {
-            /* One line per buffer per second: the title runs several, and
-             * reporting whichever happened to ask last says nothing. */
-            static struct { uint32_t self; uint32_t next_tick; } seen[8];
-            uint32_t now = (uint32_t)GetTickCount64();
-            unsigned i;
-
-            for (i = 0; i < 8 && seen[i].self && seen[i].self != self; i++) { }
-            if (i < 8) {
-                seen[i].self = self;
-                if (now >= seen[i].next_tick) {
-                    /* Why the position comes back as zero.
-                     *
-                     * FUN_0026302e only reads the voice's current offset when
-                     * the buffer's flag bit 0 is set and the voice is no
-                     * longer marked NEW_VOICE. The voice register array base
-                     * lives at 0x0027CCB0, each voice is 0x80 bytes, PAR_STATE
-                     * is at +0x54 and PAR_OFFSET (CBO) at +0x58. */
-                    uint32_t regs = dsp_readable(0x0027CCB0)
-                                        ? MEM32(0x0027CCB0) : 0;
-                    uint32_t handle = dsp_readable(self + 0xC)
-                                        ? (MEM32(self + 0xC) & 0xFFFF) : 0;
-                    uint32_t flags = dsp_readable(self + 0x10)
-                                        ? ((MEM32(self + 0x10) >> 16) & 0xFF) : 0;
-                    uint32_t state = 0, cbo = 0;
-
-                    if (regs && dsp_readable(regs + handle * 0x80 + 0x58)) {
-                        state = MEM32(regs + handle * 0x80 + 0x54);
-                        cbo = MEM32(regs + handle * 0x80 + 0x58) & 0x00FFFFFF;
-                    }
-
-                    seen[i].next_tick = now + 1000;
-                    fprintf(stderr, "  [DSOUND] buffer 0x%08X voice 0x%08X:"
-                            " play cursor %u, write cursor %u"
-                            " | handle %u flags 0x%02X regs 0x%08X"
-                            " state 0x%08X (new_voice %d) cbo %u\n",
-                            self, voice,
-                            dsp_readable(play_out) ? MEM32(play_out) : 0u,
-                            dsp_readable(write_out) ? MEM32(write_out) : 0u,
-                            handle, flags, regs, state,
-                            (state & (1u << 20)) ? 1 : 0, cbo);
-                    fflush(stderr);
-                }
-            }
-        }
-    }
+    static const struct { uint32_t va; recomp_func_t f; } portes[] = {
+        { 0x0025C96E, sub_0025C96E },   /* DirectSoundCreate */
+        { 0x0025C9B5, sub_0025C9B5 },   /* DirectSoundCreateBuffer */
+        { 0x00256E61, sub_00256E61 },   /* IDirectSound_Release */
+        { 0x0025C620, sub_0025C620 },   /* IDirectSound_CreateSoundBuffer */
+        { 0x0025917D, sub_0025917D },   /* IDirectSound_SetMixBinHeadroom */
+        { 0x002590D1, sub_002590D1 },   /* IDirectSound_DownloadEffectsImage */
+        { 0x0025C7A8, sub_0025C7A8 },   /* IDirectSound_SetI3DL2Listener */
+        { 0x00256E97, sub_00256E97 },   /* IDirectSoundBuffer_Release */
+        { 0x0025B15D, sub_0025B15D },   /* IDirectSoundBuffer_SetMixBins */
+        { 0x00259307, sub_00259307 },   /* IDirectSoundBuffer_SetMixBinVolumes */
+        { 0x002592B3, sub_002592B3 },   /* IDirectSoundBuffer_SetEG */
+        { 0x002592CF, sub_002592CF },   /* IDirectSoundBuffer_SetFilter */
+        { 0x0025B125, sub_0025B125 },   /* IDirectSoundBuffer_SetFrequency */
+        { 0x0025BB3D, sub_0025BB3D },   /* IDirectSoundBuffer_SetBufferData */
+        { 0x002593E7, sub_002593E7 },   /* IDirectSoundBuffer_SetLoopRegion */
+        { 0x00259443, sub_00259443 },   /* IDirectSoundBuffer_SetCurrentPosition */
+        { 0x00259323, sub_00259323 },   /* IDirectSoundBuffer_Play */
+        { 0x002593A7, sub_002593A7 },   /* IDirectSoundBuffer_Pause */
+        { 0x00259383, sub_00259383 },   /* IDirectSoundBuffer_StopEx */
+        { 0x00259407, sub_00259407 },   /* IDirectSoundBuffer_GetStatus */
+        { 0x00259423, sub_00259423 },   /* IDirectSoundBuffer_GetCurrentPosition */
+    };
+    unsigned i;
+    for (i = 0; i < sizeof portes / sizeof portes[0]; i++)
+        if (portes[i].va == va) return portes[i].f;
+    return NULL;
 }
 
 /* The CRT thread-exit callback at 0x002091E3.
@@ -538,6 +267,7 @@ void sub_0026415B(void)
  */
 extern void sub_00203C67(void);
 extern recomp_func_t recomp_lookup(uint32_t xbox_va);
+
 static recomp_func_t recomp_lookup_manual_fwd(uint32_t xbox_va);
 
 /* Sonde sur la conversion flottant -> entier 16 bits du moteur audio
@@ -1194,6 +924,700 @@ static uint32_t unlock_profile(void)
     return MEM32(fe + 4);
 }
 
+/* La liste des personnages debloques du profil n'a que 80 places (mesure le 2026-10-15 dans
+ * Options : elle va des octets 4896 a 5215, suivie d'un bloc de 32 octets puis d'une liste de
+ * 32 entiers et de son compte a 5396). sub_00016810 insere sans controle : avec les 44
+ * personnages de Vendetta (121 en tout), le deblocage ecrivait 41 poignees par-dessus ces
+ * donnees -- 9 personnages restaient bloques et le combat suivant se figeait au chargement.
+ *
+ * 1. Un personnage AJOUTE (rang >= 75 dans l'index des cles, poignee 0x07xxxxxx) est toujours
+ *    debloque : sub_00017000 le trouve, donc personne ne l'insere dans la liste.
+ * 2. Un profil deja deborde est repare une fois charge : compte ramene a 80, et la fin du bloc
+ *    de sauvegarde (octets 5216 a 5403) remise a la valeur des sauvegardes saines (identique
+ *    dans celles du 22 septembre et du point 105). L'autosave la reecrit, signature comprise. */
+#define PROFIL_PLACES     80u
+#define PROFIL_ORIGINAUX  75u
+#define PROFIL_LISTE      4896u       /* decalage de la liste dans Options */
+#define PROFIL_COMPTE     4772u
+#define PROFIL_QUEUE      5216u
+static const uint32_t profil_queue_saine[47] = {
+    0x45411131, 0x2d514d49, 0x0d395955, 0x25015d1d, 0x69156561, 0x213d6d09, 0x71352905, 0x7d797519,
+    0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+    25, 26, 27, 28, 29, 30, 31,
+    0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0x20, 0x101 };
+
+static int personnage_ajoute(uint32_t h)
+{
+    return (h & 0xff000000u) == 0x07000000u && (h & 0x007fffffu) >= PROFIL_ORIGINAUX;
+}
+
+static void profil_reparer_tick(void)
+{
+    static int signale;
+    uint32_t p = unlock_profile(), n, data, pc, base, k;
+    if (!p || !dsp_readable(p + 0x2c))
+        return;
+    n = MEM32(p + 0x24);
+    if (n <= PROFIL_PLACES)
+        return;
+    data = MEM32(p + 0x2c);
+    pc = MEM32(p + 0x28);
+    base = data - PROFIL_LISTE;
+    if (!dsp_readable(base) || !dsp_readable(base + PROFIL_QUEUE + sizeof profil_queue_saine - 4)
+        || pc != base + PROFIL_COMPTE) {
+        if (!signale++) {
+            fprintf(stderr, "  [PROFIL] %u personnages debloques, mais la liste n'est pas a sa place"
+                    " (donnees 0x%08X, compte 0x%08X) : rien repare\n", n, data, pc);
+            fflush(stderr);
+        }
+        return;
+    }
+    /* (Une premiere version cherchait aussi dans le profil une copie du compte de la liste
+     * suivante, sur une supposition : elle a ecrase un pointeur a +0x48 et le jeu a plante.
+     * On ne touche qu'au bloc de sauvegarde, mesure.) */
+    for (k = 0; k < sizeof profil_queue_saine / 4; k++)
+        MEM32(base + PROFIL_QUEUE + 4 * k) = profil_queue_saine[k];
+    MEM32(p + 0x24) = PROFIL_PLACES;
+    MEM32(pc) = PROFIL_PLACES;
+    fprintf(stderr, "  [PROFIL] liste des debloques ramenee de %u a %u places, fin de la sauvegarde"
+            " restauree (octets %u a %u)\n", n, PROFIL_PLACES, PROFIL_QUEUE,
+            PROFIL_QUEUE + (unsigned)sizeof profil_queue_saine - 1);
+    fflush(stderr);
+}
+
+/* La recherche dichotomique des listes du profil (base, nombre, &poignee) : un personnage
+ * ajoute est toujours trouve, sur une copie de sa poignee. */
+extern uint32_t xbox_ContiguousAlloc(uint32_t size, uint32_t alignment);
+extern void sub_00017000_gen(void);
+void sub_00017000(void)
+{
+    static uint32_t copie;
+    uint32_t pp = MEM32(g_esp + 12);
+    uint32_t h = (pp && dsp_readable(pp)) ? MEM32(pp) : 0;
+    sub_00017000_gen();
+    if (g_eax == 0 && personnage_ajoute(h)) {
+        if (!copie)
+            copie = xbox_ContiguousAlloc(16, 16);
+        if (copie) {
+            MEM32(copie) = h;
+            g_eax = copie;
+        }
+    }
+}
+
+/* L'entree et la victoire d'un coreID clone (2026-10-15). sub_00087AF0 choisit l'animation
+ * d'entree / de victoire d'un joueur : si le coreID du joueur (reglages du combat, this+0x2FF5C,
+ * +0xA8 + joueur x 4) vaut 87 (0x57) ou plus, il le prend pour le heros du mode Story et tire une
+ * entree 'HERO' au hasard, sinon il prend celle du modele (IntroExtro.xml). Mesure en jeu : Drake
+ * (coreID 78) joue son entree, Opal et DMX (coreID 97 et 91) celles du heros. Les clones de
+ * coreid.txt vont jusqu'a 99 : pendant l'appel, le coreID d'un clone est remplace par celui de son
+ * donneur (sous 87), puis remis. Le heros, absent de coreid.txt, n'est pas touche.
+ *
+ * Les coreID 86 a 141 sont les jeux de coups du heros, un par combinaison de styles (point 177) :
+ * depuis le 30 octobre, les clones vont au-dela, 142 a CORE_MAX - 1. Les coreID du jeu restent
+ * 0 a 141 ; au-dela, il n'y a que des clones de coreid.txt. */
+#define CORE_JEU 142                 /* coreID 0 a 141 : main_all.dat et wres_all d'origine */
+#define CORE_MAX 256
+int g_core_donneur[CORE_MAX];
+int g_core_voix[CORE_MAX];
+
+/* La table des voix (0x2DC5D0, 12 octets par coreID) n'a que 104 entrees, et ce qui la suit sert
+ * ailleurs (2026-10-27). Au premier appel de sub_0003E170, son seul lecteur, elle est recopiee avec
+ * CORE_MAX entrees -- les 142 premieres avec les octets d'apres compris, le heros (141) lit donc ce
+ * qu'il lisait ; au-dela, l'entree 0 (inutilisee, voix -1) -- et les clones 104 et plus de
+ * coreid.txt y recoivent l'entree de leur donneur et leur voix. La copie de sub_0003E170
+ * (patch_gen.py) lit g_voix_va au lieu de 0x2DC5D0. */
+uint32_t g_voix_va = 0x2DC5D0u;
+extern void sub_0003E170_gen(void);
+extern void sub_0003E170_patch(void);
+void sub_0003E170(void)
+{
+    static int fait;
+    if (!fait) {
+        uint32_t va = xbox_ContiguousAlloc(12 * CORE_MAX, 16);
+        int c;
+        fait = 1;
+        if (va) {
+            memcpy((void *)XBOX_PTR(va), (void *)XBOX_PTR(0x2DC5D0u), 12 * CORE_JEU);
+            for (c = CORE_JEU; c < CORE_MAX; c++)
+                memcpy((void *)XBOX_PTR(va + 12 * c), (void *)XBOX_PTR(va), 12);
+            for (c = 104; c < CORE_MAX; c++) {
+                if (g_core_donneur[c] < 0)
+                    continue;
+                memcpy((void *)XBOX_PTR(va + 12 * c), (void *)XBOX_PTR(va + 12 * g_core_donneur[c]), 12);
+                MEM32(va + 12 * c) = (uint32_t)g_core_voix[c];
+            }
+            g_voix_va = va;
+        }
+    }
+    sub_0003E170_patch();
+}
+
+/* Les paires WPAR / WWAZ de main_all.dat au-dela de 141 (2026-10-30). sub_001A47B0 (eax = le
+ * fichier) range les blocs du fichier, qui n'a pas de compte : six blocs, puis 141 paires dans un
+ * tableau statique (0x3B8648, 16 octets par coreID - 1 : taille et adresse du WPAR, puis du WWAZ),
+ * borne fixe 0x3B8F18 ; ce qui suit sert ailleurs. Ses lecteurs (sub_001A7F30, sub_001B2090,
+ * sub_001B4930, sub_001B4BA0) indexent par le coreID - 1 du combattant (+0x2C) x 16. Ici : le
+ * tableau recopie dans g_paires_va, CORE_MAX - 1 places, completees par les paires qui suivent la
+ * 141e dans le fichier du mod ; les lecteurs le lisent la (patch_gen.py). Une place sans paire
+ * garde celle du coreID 1 : pas d'adresse nulle. */
+uint32_t g_paires_va = 0x3B8648u;
+extern void sub_001A47B0_gen(void);
+void sub_001A47B0(void)
+{
+    uint32_t p = g_eax, n, k;
+    static uint32_t va;
+    static int note;
+    sub_001A47B0_gen();
+    if (!va) {
+        va = xbox_ContiguousAlloc(16 * (CORE_MAX - 1), 16);
+        if (!va)
+            return;
+    }
+    memcpy((void *)XBOX_PTR(va), (void *)XBOX_PTR(0x3B8648u), 16 * (CORE_JEU - 1));
+    for (k = 0; k < 6 + 2 * (CORE_JEU - 1); k++)
+        p += 8 + MEM32(p + 4);                     /* les blocs deja ranges par le jeu */
+    n = CORE_JEU - 1;
+    while (n < CORE_MAX - 1 && MEM32(p) == 0x52415057u /* WPAR */
+           && MEM32(p + 8 + MEM32(p + 4)) == 0x5A415757u /* WWAZ */) {
+        uint32_t q = p + 8 + MEM32(p + 4);
+        MEM32(va + 16 * n) = MEM32(p + 4);
+        MEM32(va + 16 * n + 4) = p + 8;
+        MEM32(va + 16 * n + 8) = MEM32(q + 4);
+        MEM32(va + 16 * n + 12) = q + 8;
+        p = q + 8 + MEM32(q + 4);
+        n++;
+    }
+    for (k = n; k < CORE_MAX - 1; k++)
+        memcpy((void *)XBOX_PTR(va + 16 * k), (void *)XBOX_PTR(va), 16);
+    g_paires_va = va;
+    if (!note || n > CORE_JEU - 1) {
+        fprintf(stderr, "  [MODS] main_all.dat : %u paires WPAR/WWAZ (coreID 1 a %u)\n", n, n);
+        note = 1;
+    }
+}
+extern void sub_001A7F30_gen(void);
+extern void sub_001B2090_gen(void);
+extern void sub_001B4930_gen(void);
+extern void sub_001B4BA0_gen(void);
+extern void sub_001A7F30_patch(void);
+extern void sub_001B2090_patch(void);
+extern void sub_001B4930_patch(void);
+extern void sub_001B4BA0_patch(void);
+void sub_001A7F30(void) { sub_001A7F30_patch(); }
+void sub_001B2090(void) { sub_001B2090_patch(); }
+void sub_001B4930(void) { sub_001B4930_patch(); }
+void sub_001B4BA0(void) { sub_001B4BA0_patch(); }
+/* L'activation du Blazin de Vendetta (2026-10-27). La cinematique d'activation de FFNY est la meme
+ * pour tous : assets/Blazin.xml (nis.viv), 4 plans BT1_01, BT2_0x, BT3_0x, BT4C01. Chaque plan est
+ * une requete du sous-systeme d'entree/victoire (objet de 0x1AC octets) : sub_00087AF0 la cree avec
+ * la fiche du plan (joueur en +4), FUN_000a3e20 lit le XML (etat +0x19C = 4 pour Blazin.xml) et y
+ * range le nom du plan (+0x61) et le nombre de plans (+0xD0) ; le numero du plan est en +0xD4 ;
+ * FUN_0008b120 enchaine les plans tant que leur compte est sous +0xD0. mods\blazin_activation.txt
+ * (<coreID> <archive>, outils de defjam_vendetta : activation_ffny.py) donne a un coreID son propre
+ * plan unique : son archive (assets/v2ta/<archive>.viv, corps + cameras) au premier plan, et un
+ * seul plan. */
+#define ACTIVATIONS_MAX 64
+static int activ_core[ACTIVATIONS_MAX];
+static char activ_nom[ACTIVATIONS_MAX][16];
+static char activ_fin[ACTIVATIONS_MAX][16];  /* archive des plans 2 a 4 (la derniere image, tenue) */
+static int activ_n = -1;
+static uint32_t activ_req[32];               /* requete -> coreID du joueur (sub_00087AF0) */
+static uint32_t activ_req_core[32];
+static char activ_req_nom[32][16];           /* l'archive Vendetta qu'on y a posee ("" : celle du jeu) */
+static char activ_req_orig[32][3][32];       /* les noms du jeu : archive +0x61, corps, camera +0x1D */
+
+static void activ_lire(void)
+{
+    FILE *f;
+    char l[128];
+    activ_n = 0;
+    f = fopen("game_files\\mods\\blazin_activation.txt", "r");
+    if (!f)
+        return;
+    while (fgets(l, sizeof l, f) && activ_n < ACTIVATIONS_MAX) {
+        int c;
+        char nom[16], fin[16] = "";
+        if (l[0] == '#' || sscanf(l, "%d %15s %15s", &c, nom, fin) < 2)
+            continue;
+        activ_core[activ_n] = c;
+        strcpy(activ_nom[activ_n], nom);
+        strcpy(activ_fin[activ_n], fin);
+        activ_n++;
+    }
+    fclose(f);
+    fprintf(stderr, "  [BLAZIN] %d activation(s) propre(s) (blazin_activation.txt)\n", activ_n);
+}
+
+static void activ_noter(uint32_t req, uint32_t core)
+{
+    /* circulaire : chaque combat cree ses requetes (une dizaine par joueur) a des adresses neuves */
+    static int suivante;
+    int i;
+    for (i = 0; i < 32; i++) {
+        if (activ_req[i] == req) {
+            activ_req_core[i] = core;
+            activ_req_nom[i][0] = 0;      /* recreee : sub_000A3E20 y reposera l'archive voulue */
+            return;
+        }
+    }
+    activ_req[suivante] = req;
+    activ_req_core[suivante] = core;
+    activ_req_nom[suivante][0] = 0;
+    activ_req_orig[suivante][0][0] = 0;
+    suivante = (suivante + 1) % 32;
+}
+
+/* Les trois noms d'une requete de plan : archive (+0x61), corps (1er de la liste +0x90), camera
+ * d'arene du plan 4 (+0x1D, vide sinon). lire : copie vers t ; sinon ecrit t (les vides sautes). */
+static void activ_noms(uint32_t req, char t[3][32], int lire)
+{
+    char *p[3];
+    int n;
+    p[0] = (char *)XBOX_PTR(req + 0x61u);
+    p[1] = (MEM32(req + 0x90u) && dsp_readable(MEM32(req + 0x90u))) ? (char *)XBOX_PTR(MEM32(req + 0x90u)) : NULL;
+    p[2] = (char *)XBOX_PTR(req + 0x1Du);
+    for (n = 0; n < 3; n++) {
+        if (!p[n])
+            continue;
+        if (lire) {
+            strncpy(t[n], p[n], 31);
+            t[n][31] = 0;
+        } else if (t[n][0] && (n < 2 || p[n][0]))
+            strcpy(p[n], t[n]);
+    }
+}
+
+/* L'archive Vendetta voulue pour un coreID et un numero de plan ("" : les plans du jeu). */
+static const char *activ_voulu(uint32_t core, uint32_t plan)
+{
+    int j;
+    if (activ_n < 0)
+        activ_lire();
+    for (j = 0; j < activ_n; j++)
+        if ((uint32_t)activ_core[j] == core)
+            return plan == 0 ? activ_nom[j] : activ_fin[j];
+    return "";
+}
+
+extern void sub_000A3E20_gen(void);
+void sub_000A3E20(void)
+{
+    uint32_t req = g_ecx;
+    int i, j;
+    sub_000A3E20_gen();
+    if (!(g_eax & 0xFF) || !dsp_readable(req + 0x19Cu) || MEM32(req + 0x19Cu) != 4u)
+        return;
+    fprintf(stderr, "  [BLAZIN] plan %u / %u : %s (requete %08X, liste %s)\n", MEM32(req + 0xD4u) + 1,
+            MEM32(req + 0xD0u), (char *)XBOX_PTR(req + 0x61u), req,
+            MEM32(req + 0x90u) ? (char *)XBOX_PTR(MEM32(req + 0x90u)) : "-");
+    if (activ_n < 0)
+        activ_lire();
+    for (i = 0; i < 32; i++)
+        if (activ_req[i] == req)
+            activ_noms(req, activ_req_orig[i], 1);       /* les noms du XML, pour les remettre */
+    if (MEM32(req + 0xD4u) != 0) {
+        /* Mesure du 27 octobre (combat automatique, journal) : a l'activation le jeu cree d'un coup
+         * une requete par variante (plan 1, les 4 variantes du 2 et du 3, le 4) et enchaine les 4
+         * plans quel que soit leur nombre (+0xD0). Les plans 2 a 4 prennent donc l'archive de fin
+         * (la derniere image du plan unique, 2 images) : archive (+0x61), corps (+0x90) et camera
+         * d'arene du plan 4 (+0x1D, chargee a part quand le drapeau 8 est leve). */
+        for (i = 0; i < 32; i++)
+            if (activ_req[i] == req)
+                for (j = 0; j < activ_n; j++)
+                    if ((uint32_t)activ_core[j] == activ_req_core[i] && activ_fin[j][0]) {
+                        strcpy((char *)XBOX_PTR(req + 0x61u), activ_fin[j]);
+                        if (MEM32(req + 0x90u) && dsp_readable(MEM32(req + 0x90u)))
+                            strcpy((char *)XBOX_PTR(MEM32(req + 0x90u)), activ_fin[j]);
+                        if (MEM8(req + 0x1Du))
+                            strcpy((char *)XBOX_PTR(req + 0x1Du), activ_fin[j]);
+                        strcpy(activ_req_nom[i], activ_fin[j]);
+                    }
+        return;
+    }
+    for (i = 0; i < 32; i++) {
+        if (activ_req[i] != req)
+            continue;
+        for (j = 0; j < activ_n; j++) {
+            if ((uint32_t)activ_core[j] == activ_req_core[i]) {
+                char *nom = (char *)XBOX_PTR(req + 0x61u);
+                fprintf(stderr, "  [BLAZIN] activation du coreID %u : %s au lieu de %s, 1 plan au lieu de %u\n",
+                        activ_req_core[i], activ_nom[j], nom, MEM32(req + 0xD0u));
+                strcpy(nom, activ_nom[j]);
+                /* le nom de l'animation du corps : 1er personnage de la liste en +0x90 (0x68 octets
+                 * chacun, FUN_000a3160) ; reste BT1_01, le corps n'etait pas trouve dans l'archive
+                 * (position de repos, essai du 27 octobre) */
+                if (MEM32(req + 0x90u) && dsp_readable(MEM32(req + 0x90u)))
+                    strcpy((char *)XBOX_PTR(MEM32(req + 0x90u)), activ_nom[j]);
+                MEM32(req + 0xD0u) = 1;
+                strcpy(activ_req_nom[i], activ_nom[j]);
+                return;
+            }
+        }
+        return;
+    }
+}
+
+/* Le plan applique au combattant qui active (FUN_00087e20(requete, fiche) : fiche[1] le joueur,
+ * fiche[3] = 2 pour le Blazin, fiche[5] l'etape). Mesure du 27 octobre (combat automatique,
+ * captures) : les requetes d'activation sont preparees une fois, en debut de combat, pour le joueur
+ * 1, puis jouees sur celui qui active -- le CPU a joue l'activation Vendetta du joueur 1. Si
+ * l'archive preparee n'est pas celle du combattant qui active, l'etat de chargement de la requete
+ * est remis a zero (archive +0x5C, chargee +0x60, prete +0x81, camera d'arene +0x18 / +0x1C / +0x84 :
+ * les champs que FUN_000a3fa0 initialise) avant de laisser le jeu continuer : FUN_000a3e80, rappele
+ * a chaque image par l'enchaineur tant que le plan n'est pas pret, relit le XML (sub_000A3E20
+ * choisit alors selon le coreID de celui qui active), rouvre l'archive et attend son chargement.
+ * (Premier essai, fiche[5] remise a 0 pour recreer la requete : le jeu se figeait.) */
+extern void sub_00087E20_gen(void);
+extern void sub_000A3E80(void);
+extern void sub_000A3130(void);
+void sub_00087E20(void)
+{
+    uint32_t req = MEM32(g_esp + 4), fiche = MEM32(g_esp + 8);
+    if (dsp_readable(fiche + 20) && MEM32(fiche + 12) == 2u && dsp_readable(req + 0xD4u)) {
+        uint32_t joueur = MEM32(fiche + 4);
+        uint32_t etat = dsp_readable(g_ecx + 0x2FF5Cu) ? MEM32(g_ecx + 0x2FF5Cu) : 0;
+        if (etat && joueur < 8 && dsp_readable(etat + 0xA8u + 4u * joueur)) {
+            uint32_t core = MEM32(etat + 0xA8u + 4u * joueur);
+            const char *voulu = activ_voulu(core, MEM32(req + 0xD4u)), *pose = "";
+            int i, k = -1;
+            for (i = 0; i < 32; i++)
+                if (activ_req[i] == req) {
+                    pose = activ_req_nom[i];
+                    k = i;
+                }
+            if (strcmp(voulu, pose) != 0) {
+                fprintf(stderr, "  [BLAZIN] plan %u prepare avec '%s', active par le coreID %u ('%s') : rechargement\n",
+                        MEM32(req + 0xD4u) + 1, pose, core, voulu);
+                if (k < 0) {
+                    activ_noter(req, core);
+                    for (i = 0; i < 32; i++)
+                        if (activ_req[i] == req)
+                            k = i;
+                }
+                /* les noms ecrits ici : le rechargement ne relit pas le XML (essai du 27 octobre :
+                 * l'archive etait rouverte sous l'ancien nom) */
+                if (k >= 0) {
+                    char t[3][32];
+                    if (voulu[0]) {
+                        strcpy(t[0], voulu); strcpy(t[1], voulu); strcpy(t[2], voulu);
+                        activ_noms(req, t, 0);
+                        if (MEM32(req + 0xD4u) == 0)
+                            MEM32(req + 0xD0u) = 1;
+                    } else if (activ_req_orig[k][0][0])
+                        activ_noms(req, activ_req_orig[k], 0);
+                    activ_req_core[k] = core;
+                    strcpy(activ_req_nom[k], voulu);
+                }
+                MEM32(req + 0x5Cu) = 0xFFFFFFFFu;
+                MEM8(req + 0x60u) = 0;
+                MEM8(req + 0x81u) = 0;
+                MEM32(req + 0x18u) = 0xFFFFFFFFu;
+                MEM8(req + 0x1Cu) = 0;
+                MEM32(req + 0x84u) = 0xFFFFFFFFu;
+                /* Mesure du 27 octobre (journal du joueur, CPU en position de repos) : rien ne
+                 * rouvrait l'archive -- les plans de Blazin sont prepares en debut de combat par
+                 * sub_00088FF0 (etat 0 -> 1 : FUN_000a3e80 jusqu'a ce qu'il soit pret, puis
+                 * FUN_000a3130, etat 2), et l'activation les joue tout de suite. On refait donc ici
+                 * cette preparation, en attendant le chargement (3 s au plus). */
+                {
+                    uint32_t s[8] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi, g_ebp, g_esp };
+                    DWORD t0 = GetTickCount();
+                    int pret = 0, n = 0;
+                    do {
+                        g_esp -= 4; MEM32(g_esp) = 0;
+                        g_ecx = req;
+                        sub_000A3E80();
+                        n++;
+                        if (g_eax & 0xFF) { pret = 1; break; }
+                        Sleep(1);
+                    } while (GetTickCount() - t0 < 3000);
+                    if (pret) {
+                        g_esp -= 4; MEM32(g_esp) = 0;
+                        g_esp -= 4; MEM32(g_esp) = 0;
+                        g_ecx = req;
+                        sub_000A3130();
+                    }
+                    fprintf(stderr, "  [BLAZIN] plan %u : '%s' %s (%d appels, %lu ms)\n", MEM32(req + 0xD4u) + 1,
+                            (char *)XBOX_PTR(req + 0x61u), pret ? "charge" : "PAS CHARGE", n,
+                            (unsigned long)(GetTickCount() - t0));
+                    g_eax = s[0]; g_ebx = s[1]; g_ecx = s[2]; g_edx = s[3];
+                    g_esi = s[4]; g_edi = s[5]; g_ebp = s[6]; g_esp = s[7];
+                }
+            }
+        }
+    }
+    sub_00087E20_gen();
+}
+
+/* La demande de cri d'activation (evenement 0x41 valeur 4 -> FUN_00032170 -> moteur d'EA,
+ * categorie 3, evenement 1, la voix en argument sur la pile). Le moteur ne joue pas le cri a chaque fois :
+ * le plan d'activation Vendetta le demande donc 3 fois (animtags.py) ; mais un cri deja parti est
+ * relance par la demande suivante (le debut se repetait, signale par l'utilisateur le 27 octobre).
+ * Mesure du meme jour : la valeur rendue vaut 1 a chaque demande, mais la banque Character de la voix
+ * n'est ouverte que pour le cri accepte (kernel_path.c note l'heure). Le filtre est dans
+ * sub_000379E0 (l'evenement entier) : ignorer ici la seule demande laissait l'appelant couper la voix
+ * (FUN_00137390, l'aboiement commencait puis se coupait). */
+extern volatile unsigned long g_xbox_speech_character_tick[1024];
+extern void sub_00032170_gen(void);
+void sub_00032170(void)
+{
+    sub_00032170_gen();
+}
+
+/* Le rangement des formes d'un film Apt (sub_0017F080, appele par sub_001813E0 seul : ebx = tableau
+ * local de ecx = 0x200 places, argument = le film) : chaque forme va a la place atol(son nom), sans
+ * borne -- une forme numerotee 512 ou plus ecrase la pile (le jeu se figeait apres le chargement de
+ * la grille de selection avec une forme sepia par personnage Vendetta, point 107). L'appelant ne se
+ * sert pas du numero de la place : il passe les 512 places et pose une matrice sur chaque forme. Le
+ * corps genere range donc dans un tableau de 4096 places a part, puis les formes sont
+ * recopiees a la suite dans le vrai tableau : la limite porte sur le nombre de formes (512), plus
+ * sur leur numero. */
+extern void sub_0017F080_gen(void);
+void sub_0017F080(void)
+{
+    static uint32_t grand;
+    uint32_t table = g_ebx, n = g_ecx, film = MEM32(g_esp + 4), ret = g_esp, i, k = 0;
+    if (!grand)
+        grand = xbox_ContiguousAlloc(4 * 0x1000, 16);
+    if (!grand || n != 0x200) {
+        sub_0017F080_gen();
+        return;
+    }
+    g_esp -= 4; MEM32(g_esp) = film;
+    g_esp -= 4; MEM32(g_esp) = 0;           /* adresse de retour, depilee par le corps */
+    g_ebx = grand;
+    g_ecx = 0x1000;
+    sub_0017F080_gen();
+    for (i = 0; i < n; i++)
+        MEM32(table + 4 * i) = 0;
+    for (i = 0; i < 0x1000; i++) {
+        uint32_t f = MEM32(grand + 4 * i);
+        if (f && k < n)
+            MEM32(table + 4 * k++) = f;
+    }
+    g_ebx = table;
+    g_ecx = n;
+    g_esp = ret + 4;                        /* ret simple, comme le corps genere */
+}
+
+/* Le traitement d'un evenement d'animation (FUN_000379e0(evenement) : code en +0, valeur en +2,
+ * combattant en +0x18 ; sa voix a 0x3403B4 + 100 x combattant). Un cri d'activation (0x41, valeur 4)
+ * arrivant moins de 6 s apres l'ouverture de la banque Character de cette voix -- le cri est parti --
+ * est ignore en entier. */
+extern void sub_000379E0_gen(void);
+void sub_000379E0(void)
+{
+    uint32_t ev = MEM32(g_esp + 4);
+    if (dsp_readable(ev + 0x18) && MEM16(ev) == 0x41 && MEM16(ev + 2) == 4) {
+        uint32_t c = MEM16(ev + 0x18), voix;
+        if (c < 8 && dsp_readable(0x3403B4u + 100u * c)) {
+            voix = MEM32(0x3403B4u + 100u * c);
+            if (voix < 1024 && g_xbox_speech_character_tick[voix]
+                && GetTickCount() - g_xbox_speech_character_tick[voix] < 6000) {
+                g_eax = 0;
+                g_esp += 4;               /* ret simple, comme le corps genere */
+                return;
+            }
+        }
+    }
+    sub_000379E0_gen();
+}
+
+extern void sub_00087AF0_gen(void);
+void sub_00087AF0(void)
+{
+    uint32_t etat = dsp_readable(g_ecx + 0x2FF5Cu) ? MEM32(g_ecx + 0x2FF5Cu) : 0;
+    uint32_t p2 = MEM32(g_esp + 8);
+    uint32_t joueur = dsp_readable(p2 + 4) ? MEM32(p2 + 4) : 0xFFFFFFFFu;
+    uint32_t adr = 0, vieux = 0;
+    if (etat && joueur < 8 && dsp_readable(etat + 0xA8u + 4u * joueur)) {
+        adr = etat + 0xA8u + 4u * joueur;
+        vieux = MEM32(adr);
+        activ_noter(MEM32(g_esp + 4), vieux);
+        if (MEM32(p2 + 12) == 2u)
+            fprintf(stderr, "  [BLAZIN] requete %08X : joueur %u (coreID %u), type %u, plan %u\n",
+                    MEM32(g_esp + 4), joueur, vieux, MEM32(p2 + 12), MEM32(p2 + 28));
+        if (vieux >= 0x57u && vieux < CORE_MAX && g_core_donneur[vieux] >= 0)
+            MEM32(adr) = (uint32_t)g_core_donneur[vieux];
+        else
+            adr = 0;
+    }
+    sub_00087AF0_gen();
+    if (adr)
+        MEM32(adr) = vieux;
+}
+
+/* Les Blazin des personnages ajoutes (2026-10-17, lu dans le code).
+ *
+ * sub_001A8260 donne a CBlazinAnimationData::Init (sub_000A0990) trois constantes : le premier
+ * identifiant d'animation des Blazin (709), le nombre d'animations (164 = 82 paires) et un tableau
+ * d'octets (0x3BE628), un drapeau << a charger >> par animation. sub_000A0C40 lit les noms de
+ * blazin.mnl dans l'ordre (identifiant = 709 + rang) et ne charge que ceux dont le drapeau est mis ;
+ * au-dela de 164, rien : les paires neuves du mod (82 et plus) n'existaient pas pour le jeu. Ici :
+ * autant d'animations que de noms dans la liste du mod, et un tableau de drapeaux a nous, assez grand.
+ *
+ * sub_001A8180 met les drapeaux : pour chaque combattant, ses 4 Blazin (combattant + 0xB8C, +0xB90,
+ * +0xB94, +0xB98 ; les combattants a 0x3B92E0, pas 0x12E8), drapeaux aux rangs 2p et 2p+1. Mais si
+ * coreID - 1 >= 86 (coreID >= 87, le heros du mode Story), ses 4 Blazin sont d'abord remplaces par
+ * ceux des reglages du joueur (0x3B928C + 16 x joueur : les Blazin achetes du heros) -- pour DMX
+ * (clone 91) des zeros, d'ou la paire 0 (Crow) quoi qu'on ecrive dans main_all.dat. Meme fonction,
+ * transcrite, avec deux changements : les clones de coreid.txt ne sont pas le heros, et les
+ * drapeaux restent dans le tableau. */
+#define BLAZIN_PREMIER   709u
+#define BLAZIN_ORIGINE   164u
+#define BLAZIN_MAX       512u
+static uint32_t blazin_drapeaux;            /* adresse invitee du tableau de drapeaux */
+static uint32_t blazin_nombre;              /* animations de Blazin (noms de blazin.mnl) */
+static char blazin_noms[BLAZIN_MAX][16];    /* noms des animations du mod (rang 164 et plus) */
+static uint32_t blazin_noms_va;             /* les memes, en memoire invitee (sub_001A8150) */
+
+/* Blazin de dos, par rang de paire : le jeu teste << paire >= 57 >> (les 82 paires d'origine sont
+ * rangees face N06 puis dos N07) ; les paires du mod suivent, de face ou de dos selon leur nom.
+ * Lu par src/recomp_patch.c (outils/patch_gen.py). */
+unsigned char g_blazin_dos[512];
+
+static void blazin_preparer(void)
+{
+    static int dos_fait;
+    if (!dos_fait) {
+        uint32_t p;
+        dos_fait = 1;
+        for (p = 0; p < 512; p++)
+            g_blazin_dos[p] = p >= 57;                 /* le test d'origine */
+    }
+    if (blazin_drapeaux)
+        return;
+    blazin_nombre = BLAZIN_ORIGINE;
+    {
+        FILE *f = fopen("game_files\\mods\\motion\\blazin\\blazin.mnl", "rb");
+        uint32_t n = 0;
+        if (f) {
+            if (fread(&n, 4, 1, f) == 1 && n > BLAZIN_ORIGINE && n <= BLAZIN_MAX && !(n & 1)) {
+                char nom[64];
+                uint32_t k = 0, i = 0, zero;
+                int c;
+                blazin_nombre = n;
+                if (fread(&zero, 4, 1, f) == 1) {
+                    while ((c = fgetc(f)) != EOF && k < n) {
+                        if (c == '.') {
+                            nom[i] = 0;
+                            if (!(k & 1) && k / 2 >= 82)       /* les paires d'origine gardent le test */
+                                g_blazin_dos[k / 2] = strncmp(nom, "N07", 3) == 0;
+                            if (k >= BLAZIN_ORIGINE && k < BLAZIN_MAX)
+                                snprintf(blazin_noms[k], sizeof(blazin_noms[k]), "%s", nom);
+                            k++;
+                            i = 0;
+                        } else if (i < sizeof(nom) - 1) {
+                            nom[i++] = (char)c;
+                        }
+                    }
+                }
+            }
+            fclose(f);
+        }
+    }
+    blazin_drapeaux = xbox_ContiguousAlloc(BLAZIN_MAX, 16);
+    if (blazin_drapeaux)
+        memset((void *)XBOX_PTR(blazin_drapeaux), 0, BLAZIN_MAX);
+    blazin_noms_va = xbox_ContiguousAlloc(sizeof(blazin_noms), 16);
+    if (blazin_noms_va)
+        memcpy((void *)XBOX_PTR(blazin_noms_va), blazin_noms, sizeof(blazin_noms));
+    fprintf(stderr, "  [BLAZIN] %u animations (%u paires), drapeaux a 0x%08X\n",
+            blazin_nombre, blazin_nombre / 2, blazin_drapeaux);
+    fflush(stderr);
+}
+
+/* Les deux fonctions qui deduisent << de dos >> du rang (paire >= 57) : copies corrigees de
+ * outils/patch_gen.py (src/recomp_patch.c), d'apres g_blazin_dos. RECOMP_BLAZIN_NATIF : le test
+ * d'origine, pour comparer. */
+extern void sub_001A8BC0_gen(void);
+extern void sub_001A8BC0_patch(void);
+extern void sub_001D0F80_gen(void);
+extern void sub_001D0F80_patch(void);
+static int blazin_natif(void)
+{
+    static int v = -1;
+    if (v < 0)
+        v = getenv("RECOMP_BLAZIN_NATIF") != NULL;
+    return v;
+}
+void sub_001A8BC0(void)
+{
+    blazin_preparer();
+    if (blazin_natif())
+        sub_001A8BC0_gen();
+    else
+        sub_001A8BC0_patch();
+}
+void sub_001D0F80(void)
+{
+    blazin_preparer();
+    if (blazin_natif())
+        sub_001D0F80_gen();
+    else
+        sub_001D0F80_patch();
+}
+
+/* sub_001A8150(type, animation) : le nom d'une animation, lu dans deux tables de l'executable --
+ * 2088 noms pour le type 1 (les coups), 873 sinon (dont les Blazin, 709 a 872) -- et '(none)'
+ * au-dela. Le nom sert aux declencheurs de animtags.dat (cri, voix, bruitages) : les animations des
+ * paires du mod (873 et plus) prennent leur nom dans blazin.mnl. */
+extern void sub_001A8150_gen(void);
+void sub_001A8150(void)
+{
+    uint32_t type = MEM32(g_esp + 4), anim = MEM32(g_esp + 8);
+    blazin_preparer();
+    if (type != 1 && anim >= BLAZIN_PREMIER + BLAZIN_ORIGINE && anim < BLAZIN_PREMIER + blazin_nombre
+        && blazin_noms_va && blazin_noms[anim - BLAZIN_PREMIER][0]) {
+        g_eax = blazin_noms_va + 16u * (anim - BLAZIN_PREMIER);
+        g_esp += 4;
+        return;
+    }
+    sub_001A8150_gen();
+}
+
+/* (int *premier, int *nombre, char **drapeaux) */
+void sub_001A8260(void)
+{
+    uint32_t a = MEM32(g_esp + 4), b = MEM32(g_esp + 8), c = MEM32(g_esp + 12);
+    blazin_preparer();
+    MEM32(a) = BLAZIN_PREMIER;
+    MEM32(b) = blazin_drapeaux ? blazin_nombre : BLAZIN_ORIGINE;
+    MEM32(c) = blazin_drapeaux ? blazin_drapeaux : 0x3BE628u;
+    g_esp += 4;
+}
+
+void sub_001A8180(void)
+{
+    uint32_t tab, nb, j;
+    blazin_preparer();
+    tab = blazin_drapeaux ? blazin_drapeaux : 0x3BE628u;
+    nb = blazin_drapeaux ? blazin_nombre : BLAZIN_ORIGINE;
+    memset((void *)XBOX_PTR(tab), 0, blazin_drapeaux ? BLAZIN_MAX : BLAZIN_ORIGINE);
+    for (j = 0; j < 4; j++) {
+        uint32_t f = 0x3B9E9Cu + 0x12E8u * j, s = 0x3B928Cu + 0x10u * j, k;
+        int32_t ci;
+        int heros;
+        if (MEM32(f - 2964) == 0xFFFFFFFFu)
+            continue;
+        ci = (int32_t)MEM32(f - 2960);
+        heros = ci >= 0x56 && !(ci + 1 < CORE_MAX && g_core_donneur[ci + 1] >= 0);
+        for (k = 0; k < 4; k++) {
+            uint32_t slot = f - 4 + 4 * k;
+            int32_t p;
+            if (heros)
+                MEM32(slot) = MEM32(s - 4 + 4 * k);
+            p = (int32_t)MEM32(slot);
+            if (p >= 0 && (uint32_t)(2 * p + 1) < nb) {
+                MEM8(tab + 2 * p) = 1;
+                MEM8(tab + 2 * p + 1) = 1;
+            }
+        }
+    }
+    g_esp += 4;
+}
+
 static void unlock_all_tick(void)
 {
     static int enabled = -1;
@@ -1292,7 +1716,15 @@ void sub_00077040(void)
     /* One call per game update: the "updates/s" in the window title. */
     xbox_FramebufferWindowCountTick();
 
+    profil_reparer_tick();
     unlock_all_tick();
+
+    /* L'ecran courant, pour le pilote automatique (attente d'un ecran). */
+    {
+        uint32_t ecran = dsp_readable(g_ecx + 0x18) ? MEM32(g_ecx + 0x18) : 0;
+        uint32_t vt = ecran && dsp_readable(ecran) ? MEM32(ecran) : 0;
+        autopilote_ecran(vt);
+    }
 
     if (enabled < 0)
         enabled = getenv("RECOMP_STATE_TRACE") != NULL;
@@ -2158,6 +2590,135 @@ void sub_0027DE9D(void)                      /* XInputGetCapabilities */
     g_esp += 12;
 }
 
+/* Le journal des roles, sous RECOMP_ANIM_ROLES=1 (remaster, 2026-09-27) : l'heure commune
+ * aux lignes [PAD] (la manette 1, a chaque changement) et [ROLE] (les animations qui
+ * demarrent, voir anim_roles). Aligner les deux dit quelle animation le jeu joue pour
+ * chaque action du joueur, sans rien choisir a la main. */
+static int roles_actif(void)
+{
+    static int actif = -1;
+    if (actif < 0)
+        actif = getenv("RECOMP_ANIM_ROLES") ? 1 : 0;
+    return actif;
+}
+
+static double roles_ms(void)
+{
+    static LARGE_INTEGER freq, t0;
+    LARGE_INTEGER now;
+    if (!freq.QuadPart) { QueryPerformanceFrequency(&freq); QueryPerformanceCounter(&t0); }
+    QueryPerformanceCounter(&now);
+    return 1000.0 * (double)(now.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
+}
+
+/* F9, sous RECOMP_F9_MEMOIRE=1 (remaster, 2026-09-28) : toute la memoire du jeu (64 Mo, de 0x10000)
+ * dans travail\memoire_NNN.bin, et la fenetre du jeu dans travail\memoire_NNN.bmp, au meme instant.
+ * Hors ligne, l'image dit ce que voit la camera et la memoire ou elle est (position, visee, champ),
+ * ainsi que les lumieres de l'arene. F9, pas F10 : F10 est deja lu par la fenetre de capture, et
+ * GetAsyncKeyState partage son bit « appuye depuis » entre les lecteurs. */
+static void f9_capture_fenetre(const char *chemin)
+{
+    HWND h = GetForegroundWindow();
+    DWORD pid = 0;
+    RECT r;
+    if (!h) return;
+    GetWindowThreadProcessId(h, &pid);
+    if (pid != GetCurrentProcessId() || !GetClientRect(h, &r)) return;
+    int l = r.right - r.left, H = r.bottom - r.top;
+    if (l <= 0 || H <= 0) return;
+    HDC dc = GetDC(h), mdc = CreateCompatibleDC(dc);
+    HBITMAP bmp = CreateCompatibleBitmap(dc, l, H);
+    HGDIOBJ ancien = SelectObject(mdc, bmp);
+    PrintWindow(h, mdc, 3);                 /* PW_CLIENTONLY | PW_RENDERFULLCONTENT */
+    BITMAPINFOHEADER bi = { sizeof bi, l, -H, 1, 32, BI_RGB, 0, 0, 0, 0, 0 };
+    size_t n = (size_t)l * (size_t)H * 4;
+    uint8_t *px = (uint8_t *)malloc(n);
+    if (px && GetDIBits(mdc, bmp, 0, (UINT)H, px, (BITMAPINFO *)&bi, DIB_RGB_COLORS)) {
+        FILE *fo = fopen(chemin, "wb");
+        if (fo) {
+            BITMAPFILEHEADER bf = { 0x4D42, (DWORD)(sizeof bf + sizeof bi + n), 0, 0, (DWORD)(sizeof bf + sizeof bi) };
+            fwrite(&bf, sizeof bf, 1, fo);
+            fwrite(&bi, sizeof bi, 1, fo);
+            fwrite(px, 1, n, fo);
+            fclose(fo);
+        }
+    }
+    free(px);
+    SelectObject(mdc, ancien);
+    DeleteObject(bmp);
+    DeleteDC(mdc);
+    ReleaseDC(h, dc);
+}
+
+static DWORD WINAPI f9_fil_capture(LPVOID p)
+{
+    f9_capture_fenetre((const char *)p);
+    free(p);
+    return 0;
+}
+
+static void f9_vidage(void)
+{
+    static int actif = -1, avant = 0, numero = 0;
+    if (actif < 0)
+        actif = getenv("RECOMP_F9_MEMOIRE") ? 1 : 0;
+    if (!actif)
+        return;
+    int bas = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+    if (!bas || avant) { avant = bas; return; }
+    avant = 1;
+    HWND h = GetForegroundWindow();
+    DWORD pid = 0;
+    if (h) GetWindowThreadProcessId(h, &pid);
+    if (pid != GetCurrentProcessId())
+        return;
+    char chemin[128];
+    ++numero;
+    /* la capture dans un fil a part : PrintWindow attend le fil de la fenetre, et le jeu ne doit
+     * pas l'attendre (risque d'interblocage) ; quelques millisecondes d'ecart avec la memoire */
+    char *image = (char *)malloc(64);
+    if (image) {
+        snprintf(image, 64, "travail\\memoire_%03d.bmp", numero);
+        HANDLE th = CreateThread(NULL, 0, f9_fil_capture, image, 0, NULL);
+        if (th) CloseHandle(th); else free(image);
+    }
+    snprintf(chemin, sizeof chemin, "travail\\memoire_%03d.bin", numero);
+    FILE *fo = fopen(chemin, "wb");
+    if (!fo) return;
+    static uint8_t zeros[0x10000];
+    for (uint32_t va = 0x00010000u; va < 0x04010000u; va += 0x10000u) {
+        if (dsp_readable(va) && dsp_readable(va + 0xFFFC))
+            fwrite((const void *)XBOX_PTR(va), 1, 0x10000, fo);
+        else
+            fwrite(zeros, 1, 0x10000, fo);
+    }
+    fclose(fo);
+    fprintf(stderr, "  [F9] %.1f ms memoire et fenetre -> travail\\memoire_%03d\n", roles_ms(), numero);
+    fflush(stderr);
+}
+
+static void roles_manette(uint16_t buttons, const uint8_t *analog, const int16_t *thumbs)
+{
+    static uint32_t avant = 0xFFFFFFFFu;
+    uint32_t bits = 0, etat;
+    int sx, sy;
+    if (!roles_actif())
+        return;
+    for (int k = 0; k < 8; k++)
+        if (analog[k] > 30) bits |= 1u << k;
+    /* le stick gauche, en huit directions : ce qui compte, c'est quand il change */
+    sx = thumbs[0] > 12000 ? 1 : thumbs[0] < -12000 ? -1 : 0;
+    sy = thumbs[1] > 12000 ? 1 : thumbs[1] < -12000 ? -1 : 0;
+    etat = (uint32_t)buttons | (bits << 8) | ((uint32_t)(sx + 1) << 16) | ((uint32_t)(sy + 1) << 18);
+    if (etat == avant)
+        return;
+    avant = etat;
+    fprintf(stderr, "  [PAD] %.1f ms croix/start %02X boutons A.B.X.Y.noir.blanc.G.D %u%u%u%u%u%u%u%u stick %+d %+d\n",
+            roles_ms(), buttons, bits & 1, (bits >> 1) & 1, (bits >> 2) & 1, (bits >> 3) & 1,
+            (bits >> 4) & 1, (bits >> 5) & 1, (bits >> 6) & 1, (bits >> 7) & 1, sx, sy);
+    fflush(stderr);
+}
+
 #include "pad_aleatoire.h"
 
 void sub_0027E075(void)                      /* XInputGetState */
@@ -2223,6 +2784,11 @@ void sub_0027E075(void)                      /* XInputGetState */
         if (key_down('D'))       analog[7] = 255;
     }
 
+    /* RECOMP_AUTOPILOTE : la manette 1 suit un script (autopilote.c), pour les
+     * essais sans joueur ; la vraie manette et le clavier sont alors ignores. */
+    if (port == 0)
+        autopilote(&buttons, analog, thumbs);
+
     /* RECOMP_PAD_AUTOSTART=N: hold START for a quarter second every N
      * seconds, and A right after it -- for unattended test runs. */
     if (port == 0 && getenv("RECOMP_PAD_AUTOSTART")) {
@@ -2246,6 +2812,10 @@ void sub_0027E075(void)                      /* XInputGetState */
     memcpy(out + 4, &buttons, 2);
     memcpy(out + 6, analog, 8);
     memcpy(out + 14, thumbs, 8);
+    if (port == 0) {
+        roles_manette(buttons, analog, thumbs);
+        f9_vidage();
+    }
     if (memcmp(out + 4, last[port] + 4, 18) != 0) {
         packet[port]++;
         memcpy(last[port], out, sizeof out);
@@ -3050,6 +3620,18 @@ void sub_00021890(void)                      /* CAnimationBank::Get(nom) (thisca
         fflush(stderr);
     }
     anim_retenir_nom(g_eax, nom);
+    if (roles_actif()) {
+        /* une demande par nom, au plus une ligne par nom et par demi-seconde */
+        static struct { uint32_t nom; double vu; } dem[256];
+        double t = roles_ms();
+        int i = (int)((nom >> 2) & 255);
+        if (dem[i].nom != nom || t - dem[i].vu > 500.0) {
+            fprintf(stderr, "  [ROLE] %.1f ms demande %s -> objet %08X\n", t, eagl_str(nom), g_eax);
+            fflush(stderr);
+        }
+        dem[i].nom = nom;
+        dem[i].vu = t;
+    }
 }
 
 /* Les cles d'animation, sous RECOMP_ANIM_KEYS=<n> (point 117).
@@ -3063,18 +3645,21 @@ void sub_00021890(void)                      /* CAnimationBank::Get(nom) (thisca
  * temps) et les 48 octets de sortie de chacun de ses os -- de quoi comparer un
  * decodeur hors jeu a ce que le jeu calcule, sans passer par la peau. */
 static int anim_cles_reste = -1;
-static struct { uint32_t obj, piste; char nom[32]; } anim_noms[256];
+static struct { uint32_t obj, piste; char nom[32]; } anim_noms[2048];
 static int anim_noms_n;
 
 static void anim_retenir_nom(uint32_t obj, uint32_t nom)
 {
+    static int racine = -1;
     if (anim_cles_reste < 0) {
         const char *s = getenv("RECOMP_ANIM_KEYS");
         anim_cles_reste = s ? atoi(s) : 0;
     }
-    if (anim_cles_reste <= 0 || !obj || !dsp_readable(obj + 0xC))
+    if (racine < 0)
+        racine = getenv("RECOMP_ANIM_RACINE") ? 1 : 0;
+    if ((anim_cles_reste <= 0 && !racine && !roles_actif()) || !obj || !dsp_readable(obj + 0xC))
         return;
-    int i = anim_noms_n++ & 255;
+    int i = anim_noms_n++ & 2047;
     anim_noms[i].obj = obj;
     anim_noms[i].piste = MEM32(obj + 0xC);
     snprintf(anim_noms[i].nom, sizeof anim_noms[i].nom, "%s", eagl_str(nom));
@@ -3082,8 +3667,8 @@ static void anim_retenir_nom(uint32_t obj, uint32_t nom)
 
 static const char *anim_nom_de(uint32_t obj, uint32_t piste)
 {
-    for (int k = 0; k < 256; k++) {
-        int i = (anim_noms_n - 1 - k) & 255;
+    for (int k = 0; k < 2048; k++) {
+        int i = (anim_noms_n - 1 - k) & 2047;
         if (k >= anim_noms_n) break;
         if (anim_noms[i].piste == piste || anim_noms[i].obj == obj)
             return anim_noms[i].nom;
@@ -3160,21 +3745,258 @@ static void anim_cles(int meth, uint32_t self, uint32_t fbits, uint32_t out, uin
     fflush(stderr);
 }
 
+/* Des instantanes de la memoire des combattants, sous RECOMP_INSTANTANES=1 (remaster, 2026-09-27).
+ *
+ * Les objets d'animation des deux combattants sont a 0x00349xxx et 0x00354xxx (registre ebx, point
+ * 10 du remaster) : un bloc d'environ 44 Ko par combattant. Toutes les 250 ms, les 128 Ko de
+ * 0x00340000 a 0x00360000 vont dans travail\instantanes.bin (en-tete : "ISNS", heure en ms, base,
+ * taille). Hors ligne, on y cherche la position des combattants (depart connu : gamecore.xml), leur
+ * vitesse de marche et leur recul. */
+static void roles_instantane(void)
+{
+    static int actif = -1;
+    static FILE *fo;
+    static double dernier = -1e9;
+    const uint32_t base = 0x00340000u, taille = 0x00020000u;
+    if (actif < 0) {
+        actif = getenv("RECOMP_INSTANTANES") ? 1 : 0;
+        if (actif) {
+            fo = fopen("travail\\instantanes.bin", "wb");
+            if (!fo) actif = 0;
+        }
+    }
+    if (!actif)
+        return;
+    double t = roles_ms();
+    if (t - dernier < 250.0 || !dsp_readable(base) || !dsp_readable(base + taille - 4))
+        return;
+    dernier = t;
+    uint32_t tete[4] = { 0x534E5349u /* ISNS */, (uint32_t)t, base, taille };
+    fwrite(tete, 4, 4, fo);
+    fwrite((const void *)XBOX_PTR(base), 1, taille, fo);
+    fflush(fo);
+}
+
+/* Le canal 0x0D, sous RECOMP_ANIM_0D=<n> (remaster, 2026-09-27, GUIDE_REMASTER.md point 11).
+ *
+ * Classe 0x002B5670 : echantillonnage 0x000ED300, decodage 0x000FC3F0. Pour chaque enfant 0x0D
+ * d'une piste a plusieurs quaternions : l'en-tete du canal et ses indices de sortie, le flux
+ * (en-tete, triplets de flottants, rangees de deltas), la table des temps, puis les quaternions que
+ * le jeu vient d'ecrire (sortie + 4 * indice). Le decodeur du remaster
+ * (D:\djffnyremaster\pipeline\verifier_0d.py) refait le calcul et compare. */
+static void anim_0d(int meth, uint32_t self, uint32_t fbits, uint32_t out)
+{
+    static int reste = -1;
+    static uint32_t derniere[64];
+    static int vues[64];
+    if (reste < 0) {
+        const char *s = getenv("RECOMP_ANIM_0D");
+        reste = s ? atoi(s) : 0;
+    }
+    if (reste <= 0 || !dsp_readable(self + 0x14))
+        return;
+    uint32_t piste = MEM32(self + 0xC), enf = MEM32(self + 0x10);
+    if (!dsp_readable(piste + 8) || !dsp_readable(enf) || !dsp_readable(out))
+        return;
+    uint32_t n = MEM16(piste + 8), utile = 0;
+    for (uint32_t i = 0; i < n && i < 8; i++) {
+        uint32_t ch = MEM32(enf + 4 * i), c = dsp_readable(ch + 0xC) ? MEM32(ch + 0xC) : 0;
+        uint32_t fl = (c && dsp_readable(c + 0x10)) ? MEM32(c + 4) : 0;
+        if (MEM16(c) == 0x0D && fl && dsp_readable(fl + 4) && MEM16(fl) > 4) utile = 1;
+    }
+    if (!utile)
+        return;
+    int slot = (int)((piste >> 2) & 63);
+    if (derniere[slot] != piste) { derniere[slot] = piste; vues[slot] = 0; }
+    if (vues[slot]++ >= 3)
+        return;
+    reste--;
+    float f; memcpy(&f, &fbits, 4);
+    fprintf(stderr, "  [0D] meth +0x%02X piste %08X (%s) image %.6f sortie %08X\n",
+            meth, piste, anim_nom_de(self, piste), f, out);
+    for (uint32_t i = 0; i < n && i < 8; i++) {
+        uint32_t ch = MEM32(enf + 4 * i), c = dsp_readable(ch + 0xC) ? MEM32(ch + 0xC) : 0;
+        if (!c || !dsp_readable(c + 0x10) || MEM16(c) != 0x0D)
+            continue;
+        uint32_t fl = MEM32(c + 4), tm = MEM32(c + 8), nk = MEM16(c + 0xC);
+        if (!fl || !dsp_readable(fl + 4))
+            continue;
+        uint32_t nv = MEM16(fl), nq = (nv + 3) / 4, bits = MEM8(fl + 2);
+        uint32_t rangee = bits == 16 ? 2 * nv : bits == 4 ? (nv + 1) / 2 : nv;
+        fprintf(stderr, "  [0D]  enfant %u canal %08X flux %08X temps %08X cles %u valeurs %u bits %u\n",
+                i, c, fl, tm, nk, nv, bits);
+        anim_hex("0Dcanal", c, 0x0E + 2 * nq);
+        anim_hex("0Dflux", fl, 4 + 12 * nv + rangee * nk);
+        if (tm && dsp_readable(tm)) anim_hex("0Dtemps", tm, 2 * nk);
+        for (uint32_t q = 0; q < nq; q++) {
+            uint32_t idx = MEM16(c + 0x0E + 2 * q), s = out + 4 * idx;
+            float v[4];
+            for (int k = 0; k < 4; k++) {
+                uint32_t w = dsp_readable(s + 4 * k) ? MEM32(s + 4 * k) : 0;
+                memcpy(&v[k], &w, 4);
+            }
+            fprintf(stderr, "  [0D]   q %2u indice %4u : %.9g %.9g %.9g %.9g\n", q, idx, v[0], v[1], v[2], v[3]);
+        }
+    }
+    fflush(stderr);
+}
+
+/* La piste _t (deplacement de la racine), sous RECOMP_ANIM_RACINE=<n> (remaster, 2026-09-27).
+ *
+ * Meme composite que les pistes _s. Ses enfants de type 0x14 (classe 0x002B5D50,
+ * echantillonnage 0x000F14F0) et 0x15 (classe 0x002B5CC8, 0x000EFD80) ecrivent
+ * chaque valeur a sortie + 4 * indice (indices 8 a 10 dans les banques mesurees).
+ * Cette sonde releve, apres l'appel, pour chaque enfant 0x14 ou 0x15 : les octets
+ * bruts du canal, la liste des indices, la table des temps, puis les 16 premiers
+ * flottants de la sortie -- de quoi comparer le decodeur hors jeu du remaster
+ * (D:\djffnyremaster\pipeline\piste_t.py --verifier) a ce que le jeu ecrit. */
+static void anim_hex_ar(const char *tag, uint32_t va, uint32_t n)
+{
+    for (uint32_t o = 0; o < n; o += 32) {
+        fprintf(stderr, "  [AR]   %s %08X:", tag, va + o);
+        for (uint32_t k = o; k < n && k < o + 32; k++) {
+            if (!dsp_readable(va + k)) { fprintf(stderr, " .."); continue; }
+            fprintf(stderr, " %02X", MEM8(va + k));
+        }
+        fprintf(stderr, "\n");
+    }
+}
+
+static void anim_racine(int meth, uint32_t self, uint32_t fbits, uint32_t out)
+{
+    static int reste = -1;
+    static uint32_t derniere[64];
+    static int vues[64];
+    if (reste < 0) {
+        const char *s = getenv("RECOMP_ANIM_RACINE");
+        reste = s ? atoi(s) : 0;
+    }
+    if (reste <= 0 || !dsp_readable(self + 0x14))
+        return;
+    uint32_t piste = MEM32(self + 0xC), enf = MEM32(self + 0x10);
+    if (!dsp_readable(piste + 8) || !dsp_readable(enf))
+        return;
+    uint32_t n = MEM16(piste + 8), utile = 0;
+    for (uint32_t i = 0; i < n && i < 8; i++) {
+        uint32_t ch = MEM32(enf + 4 * i), c = dsp_readable(ch + 0xC) ? MEM32(ch + 0xC) : 0;
+        uint32_t t = (c && dsp_readable(c)) ? MEM16(c) : 0;
+        if (t == 0x14 || t == 0x15) utile = 1;
+    }
+    if (!utile)
+        return;
+    /* au plus trois appels de suite par piste, pour en voir beaucoup */
+    int slot = (int)((piste >> 2) & 63);
+    if (derniere[slot] != piste) { derniere[slot] = piste; vues[slot] = 0; }
+    if (vues[slot]++ >= 3)
+        return;
+    reste--;
+    float f; memcpy(&f, &fbits, 4);
+    /* l'heure de l'appel : l'avancee de l'image entre deux appels, rapportee au temps
+     * ecoule, donne la cadence des animations (30 ou 60 images/s, jamais mesuree) */
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER now;
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    fprintf(stderr, "  [AR] meth +0x%02X piste %08X (%s) image %.6f sortie %08X t %.3f ms\n",
+            meth, piste, anim_nom_de(self, piste), f, out,
+            1000.0 * (double)now.QuadPart / (double)freq.QuadPart);
+    for (uint32_t i = 0; i < n && i < 8; i++) {
+        uint32_t ch = MEM32(enf + 4 * i);
+        uint32_t c = dsp_readable(ch + 0xC) ? MEM32(ch + 0xC) : 0;
+        uint32_t t = (c && dsp_readable(c + 0x12)) ? MEM16(c) : 0;
+        fprintf(stderr, "  [AR]  enfant %u canal %08X type %04X\n", i, c, t);
+        if (t != 0x14 && t != 0x15)
+            continue;
+        uint32_t nk = MEM16(c + 0xC), np = MEM16(c + 0xE), nc = MEM8(c + 0x11);
+        uint32_t liste = MEM32(c + 4), tm = MEM32(c + 8);
+        anim_hex_ar("canal", c, 0x800);
+        if (liste && dsp_readable(liste)) anim_hex_ar("liste", liste, (np + nc) * 2);
+        if (tm && dsp_readable(tm)) anim_hex_ar("temps", tm, nk * 2);
+    }
+    if (dsp_readable(out) && dsp_readable(out + 60)) {
+        fprintf(stderr, "  [AR]  sortie :");
+        for (int k = 0; k < 16; k++) {
+            uint32_t w = MEM32(out + 4 * k);
+            float v; memcpy(&v, &w, 4);
+            fprintf(stderr, " %.7g", v);
+        }
+        fprintf(stderr, "\n");
+    }
+    fflush(stderr);
+}
+
+/* Les animations qui demarrent, sous RECOMP_ANIM_ROLES=1 (voir roles_manette).
+ *
+ * Chaque appel du composite echantillonne une piste dans un tampon de pose (la sortie).
+ * Quand une piste apparait sur une sortie ou elle n'avait pas ete echantillonnee depuis
+ * 100 ms, une ligne [ROLE] : l'heure, la sortie, la methode, le nom et l'image. Une sortie
+ * par combattant, c'est ce que le journal dira. (Mesure : non, les sorties sont des
+ * tampons partages.) D'ou le contexte de l'appel en fin de ligne -- l'objet, l'adresse de
+ * retour, ebx, esi, edi, ebp, p3 et quatre mots de pile -- pour trouver lequel dit le
+ * combattant. */
+static void anim_roles(int meth, uint32_t self, uint32_t fbits, uint32_t out, const uint32_t *ctx)
+{
+    static struct { uint32_t out, piste; double vu; } vus[1024];
+    uint32_t piste;
+    double t;
+    int i, libre = -1, vieux = 0;
+    if (!roles_actif() || !dsp_readable(self + 0x10))
+        return;
+    piste = MEM32(self + 0xC);
+    t = roles_ms();
+    for (i = 0; i < 1024; i++) {
+        if (vus[i].out == out && vus[i].piste == piste) {
+            double ecart = t - vus[i].vu;
+            vus[i].vu = t;
+            if (ecart < 100.0)
+                return;
+            break;
+        }
+        if (!vus[i].out && libre < 0)
+            libre = i;
+        if (vus[i].vu < vus[vieux].vu)
+            vieux = i;
+    }
+    if (i == 1024) {
+        i = libre >= 0 ? libre : vieux;
+        vus[i].out = out;
+        vus[i].piste = piste;
+        vus[i].vu = t;
+    }
+    float f; memcpy(&f, &fbits, 4);
+    fprintf(stderr, "  [ROLE] %.1f ms sortie %08X meth +%02X piste %08X %s image %.2f"
+                    " ctx %08X %08X %08X %08X %08X %08X %08X | %08X %08X %08X %08X\n",
+            t, out, meth, piste, anim_nom_de(self, piste), f,
+            self, ctx[0], ctx[1], ctx[2], ctx[3], ctx[4], ctx[5], ctx[6], ctx[7], ctx[8], ctx[9]);
+    fflush(stderr);
+}
+
 extern void sub_000EDF90_gen(void);
 extern void sub_000EE000_gen(void);
 
 void sub_000EDF90(void)                      /* composite d'animation, methode +0x18 */
 {
     uint32_t self = g_ecx, f = MEM32(g_esp + 4), out = MEM32(g_esp + 8), p3 = MEM32(g_esp + 12);
+    uint32_t ctx[10] = { MEM32(g_esp), g_ebx, g_esi, g_edi, g_ebp, p3,
+                         MEM32(g_esp + 16), MEM32(g_esp + 20), MEM32(g_esp + 24), MEM32(g_esp + 28) };
     sub_000EDF90_gen();
     anim_cles(0x18, self, f, out, p3);
+    anim_racine(0x18, self, f, out);
+    anim_roles(0x18, self, f, out, ctx);
+    anim_0d(0x18, self, f, out);
+    roles_instantane();
 }
 
 void sub_000EE000(void)                      /* composite d'animation, methode +0x30 */
 {
     uint32_t self = g_ecx, f = MEM32(g_esp + 4), out = MEM32(g_esp + 8), p3 = MEM32(g_esp + 12);
+    uint32_t ctx[10] = { MEM32(g_esp), g_ebx, g_esi, g_edi, g_ebp, p3,
+                         MEM32(g_esp + 16), MEM32(g_esp + 20), MEM32(g_esp + 24), MEM32(g_esp + 28) };
     sub_000EE000_gen();
     anim_cles(0x30, self, f, out, p3);
+    anim_racine(0x30, self, f, out);
+    anim_roles(0x30, self, f, out, ctx);
+    anim_0d(0x30, self, f, out);
 }
 
 /* Le menu de debogage du titre, sous RECOMP_DEBUG_MENU (point 113).
@@ -3347,11 +4169,31 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
      * Overrides are matched here for indirect calls; direct calls reach the
      * definitions above through the link step (--exclude-manual).
      */
+    if (xbox_va >= 0x00256E61u && xbox_va <= 0x0025C9B5u) {   /* DirectSound */
+        recomp_func_t f = son_hle_porte(xbox_va);
+        if (f) return f;
+    }
     if (xbox_va == 0x002016B0) return sub_002016B0;   /* memmove */
-    if (xbox_va == 0x0025F394) return sub_0025F394;   /* DSOUND DSP upload */
-    if (xbox_va == 0x0026415B) return sub_0026415B;   /* DSOUND GetCurrentPosition */
     if (xbox_va == 0x002091E3) return sub_002091E3;   /* CRT thread-exit callback */
     if (xbox_va == 0x00077040) return sub_00077040;   /* screen-state probe */
+    if (xbox_va == 0x00017000) return sub_00017000;   /* liste du profil : ajoutes debloques */
+    if (xbox_va == 0x00087AF0) return sub_00087AF0;   /* entree des coreID clones */
+    if (xbox_va == 0x0003E170) return sub_0003E170;   /* voix des coreID 104 et plus */
+    if (xbox_va == 0x001A47B0) return sub_001A47B0;   /* main_all.dat : paires au-dela de 141 */
+    if (xbox_va == 0x001A7F30) return sub_001A7F30;   /* lecteurs des paires (g_paires_va) */
+    if (xbox_va == 0x001B2090) return sub_001B2090;
+    if (xbox_va == 0x001B4930) return sub_001B4930;
+    if (xbox_va == 0x001B4BA0) return sub_001B4BA0;
+    if (xbox_va == 0x000A3E20) return sub_000A3E20;   /* activation du Blazin propre a un coreID */
+    if (xbox_va == 0x00032170) return sub_00032170;   /* demande du cri d'activation (relais) */
+    if (xbox_va == 0x000379E0) return sub_000379E0;   /* cri d'activation : pas de relance */
+    if (xbox_va == 0x0017F080) return sub_0017F080;   /* formes d'un film Apt : plus de 512 numeros */
+    if (xbox_va == 0x00087E20) return sub_00087E20;   /* activation : celle du combattant qui active */
+    if (xbox_va == 0x001A8260) return sub_001A8260;   /* Blazin : nombre et drapeaux */
+    if (xbox_va == 0x001A8180) return sub_001A8180;   /* Blazin : les clones ne sont pas le heros */
+    if (xbox_va == 0x001A8150) return sub_001A8150;   /* Blazin : noms des animations du mod */
+    if (xbox_va == 0x001A8BC0) return sub_001A8BC0;   /* Blazin : face ou dos selon le nom */
+    if (xbox_va == 0x001D0F80) return sub_001D0F80;   /* Blazin : face ou dos selon le nom */
     if (xbox_va == 0x00216410) return sub_00216410;   /* D3D timed callback probe */
     if (xbox_va == 0x000D7EA0) return sub_000D7EA0;   /* input wake probe */
     if (xbox_va == 0x002231D0) return sub_002231D0;   /* vblank service probe */

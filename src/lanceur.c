@@ -584,6 +584,8 @@ int lanceur_run(void)
     const char *e = getenv("RECOMP_LANCEUR");
     const int forced = GetAsyncKeyState(VK_SHIFT) & 0x8000
                     || strstr(GetCommandLineA(), "--lanceur") != NULL;
+    /* DJFFNY.exe (lanceur/) has already shown the settings: straight to the game */
+    const int none = strstr(GetCommandLineA(), "--sans-fenetre") != NULL;
 
     if (e && *e == '0')
         return 1;                                        /* scripts: environment only */
@@ -593,7 +595,7 @@ int lanceur_run(void)
         ini_create();
         ini_save(INI_PATH);
     }
-    if (on("LANCEUR", "1") || forced) {
+    if ((on("LANCEUR", "1") || forced) && !none) {
         if (!show_window())
             return 0;
         ini_save(INI_PATH);

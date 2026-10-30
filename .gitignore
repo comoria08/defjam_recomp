@@ -96,3 +96,9 @@ paquet/telechargements/
 # Les SDK de tiers (Streamline de NVIDIA, point 155) : sous leurs propres licences,
 # telecharges a part, jamais commites
 tiers/
+
+# Cle locale du service Tripo AI
+/tripo_key.txt
+
+# genere chez le joueur par outils/patch_gen.py, jamais publie (code traduit du jeu)
+src/recomp_patch.c

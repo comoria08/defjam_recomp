@@ -64,8 +64,10 @@ LICENCES
 - This port: MIT (LICENSE).
 - The xboxrecomp toolkit: MIT, with components under the LGPL-2.1 and the
   GPL-2.0 taken from xemu and Hatari (xboxrecomp\NOTICE, xboxrecomp\LICENSES).
-- The program built on your PC links that GPL code, and it contains the
-  game's translated code: it is for your own use, do not share it.
+- The program built on your PC links only the LGPL part (the NV2A): sound
+  goes through the toolkit's own DirectSound layer (src\dsound_hle, MIT), and
+  the APU emulation, GPL DSP core included, is no longer built. It contains
+  the game's translated code: it is for your own use, do not share it.
 - The "outils" folder of the full package, trimmed of what the build does
   not use, with Python's search path set: llvm-mingw (Apache-2.0 with LLVM
   exception, and the mingw-w64 licences), Python (PSF), capstone (BSD),
@@ -145,8 +147,10 @@ LICENCES
 - Ce portage : MIT (LICENSE).
 - Le toolkit xboxrecomp : MIT, avec des éléments sous LGPL-2.1 et GPL-2.0
   repris de xemu et de Hatari (xboxrecomp\NOTICE, xboxrecomp\LICENSES).
-- Le programme compilé sur votre PC contient ce code GPL et le code traduit
-  du jeu : il est pour votre usage, ne le partagez pas.
+- Le programme compilé sur votre PC n'en lie que la partie LGPL (le NV2A) :
+  le son passe par la couche DirectSound du toolkit (src\dsound_hle, MIT), et
+  l'émulation de l'APU, cœur DSP GPL compris, n'est plus construite. Il
+  contient le code traduit du jeu : il est pour votre usage, ne le partagez pas.
 - Le dossier « outils » du paquet complet, allégé de ce que la compilation
   n'utilise pas, avec le chemin de recherche de Python réglé : llvm-mingw
   (Apache-2.0 avec exception LLVM, et les licences de mingw-w64), Python

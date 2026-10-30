@@ -333,6 +333,11 @@ if (-not (Test-Path (Join-Path $Gen "recomp_types.h"))) {
 }
 $n = (Get-ChildItem $Gen -Filter "recomp_0*.c").Count
 Ecrire ((L "  $n fichiers de C générés dans src\recomp\gen" "  $n C files generated in src\recomp\gen")) "Green"
+# Les corrections d'instructions du C genere (src\recomp_patch.c) : des copies de
+# fonctions traduites, refaites ici a partir de la traduction de cette machine,
+# jamais distribuees (outils\patch_gen.py).
+Ecrire (L "  corrections du C généré" "  patches to the generated C")
+Lancer (L "corrections du C généré" "patches to the generated C") $py ($pyArgs + @((Join-Path $Projet "outils\patch_gen.py")))
 
 # ── 5. La compilation ──────────────────────────────────────────────────
 

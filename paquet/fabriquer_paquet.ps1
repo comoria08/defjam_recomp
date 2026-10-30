@@ -43,7 +43,8 @@ $Zip     = Join-Path $Sortie "$Dossier.zip"
 $Portage = @(
     "CMakeLists.txt", "LICENSE",
     "src/main.c", "src/recomp_manual.c", "src/lanceur.c", "src/lanceur.h",
-    "src/pad_aleatoire.c", "src/pad_aleatoire.h",
+    "src/pad_aleatoire.c", "src/pad_aleatoire.h", "src/autopilote.c", "src/autopilote.h",
+    "outils/patch_gen.py",
     "icall_seeds.json", "xpp_seeds.json", "interp_seeds.json", "misc_seeds.json",
     "installeur/installer.ps1"
 )
