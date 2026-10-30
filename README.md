@@ -87,22 +87,6 @@ Run DJFFNY.exe (the "Def Jam Fight for NY" desktop shortcut), or `build\Release\
 - Saves: `game_files\UDATA`
 - Mods: `game_files\mods` (a file placed there replaces the one from the disc)
 
-## Making a mod
-
-A `.mod` file is a plain zip under another extension:
-
-- `mod.ini` at its root: name, version, description;
-- optionally `couverture.png` or `couverture.jpg` at its root: the cover shown on the mod's card in DJFFNY.exe (portrait 3:4, 600 × 800 recommended);
-- everything else goes to `game_files\mods`, in the same tree.
-
-`outils\faire_mod.py` packs a `game_files\mods` folder:
-
-```
-py -3 outils/faire_mod.py game_files/mods MyMod.mod --nom "My mod" --version 1.0 --description "..." --couverture cover.png
-```
-
-A mod that contains the game's own files is for private use only: do not distribute it.
-
 ## Licences
 
 - This port: MIT ([LICENSE](LICENSE)).
