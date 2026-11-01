@@ -12,8 +12,8 @@ MOD_DEFAUT RCDATA "images/mod_defaut_600x800.jpg"
 AUCUN_MOD RCDATA "images/aucun_mod_800x600.png"
 
 1 VERSIONINFO
-FILEVERSION 1,1,0,0
-PRODUCTVERSION 1,1,0,0
+FILEVERSION 1,2,0,0
+PRODUCTVERSION 1,2,0,0
 FILEOS 0x40004
 FILETYPE 0x1
 BEGIN
@@ -22,9 +22,9 @@ BEGIN
     BLOCK "040C04B0"
     BEGIN
       VALUE "FileDescription", "Def Jam: Fight for NY - Recompiled (lanceur)"
-      VALUE "FileVersion", "1.1.0"
+      VALUE "FileVersion", "1.2.0"
       VALUE "ProductName", "DJFFNY Recompiled"
-      VALUE "ProductVersion", "1.1.0"
+      VALUE "ProductVersion", "1.2.0"
       VALUE "OriginalFilename", "DJFFNY.exe"
       VALUE "LegalCopyright", "MIT. Non affilie a Electronic Arts."
     END

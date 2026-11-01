@@ -35,6 +35,11 @@
 #             NVIDIA RTX, l'installeur propose de telecharger Streamline (le SDK
 #             de NVIDIA qui porte le DLSS) depuis son depot officiel, dans
 #             tiers\streamline : il n'est jamais distribue avec le portage (point 160).
+# -MiseAJour  mise a jour d'une installation : game_files deja extrait est garde (pas
+#             besoin de l'image disque), la traduction en C est sautee si ses entrees n'ont
+#             pas change (empreinte dans pipeline\entrees.txt : default.xbe, graines, outil de
+#             traduction du toolkit, fonctions remplacees par recomp_manual.c, patch_gen.py),
+#             et la compilation reprend le dossier build\ : seul ce qui a change est recompile.
 # Tout est ecrit dans <Projet>\installation.log.
 param(
     [string]$Iso = "",
@@ -46,7 +51,8 @@ param(
     [Alias("Shortcut")][string]$Raccourci = "",
     [Alias("Language")][string]$Langue = "",
     [Alias("Tools")][string]$Outils = "",
-    [Alias("NoDLSS")][switch]$SansDLSS
+    [Alias("NoDLSS")][switch]$SansDLSS,
+    [Alias("Update")][switch]$MiseAJour
 )
 
 # "Continue" et non "Stop" : Windows PowerShell 5.1 fait une erreur de chaque
@@ -323,6 +329,29 @@ Lancer (L "identification" "identification") $py ($pyArgs + @("-m", "tools.func_
     "--strings", (Join-Path $dis "strings.json"), "--xrefs", (Join-Path $dis "xrefs.json"), "-o", $fid))
 Ecrire (L "  conventions d'appel" "  calling conventions")
 Lancer (L "analyse ABI" "ABI analysis") $py ($pyArgs + @("-m", "tools.abi_analysis", $XbeDest, "--disasm-dir", $dis, "--func-id-dir", $fid, "--output-dir", $abi))
+# L'empreinte de tout ce dont depend le C genere : si elle n'a pas change depuis la derniere
+# traduction, une mise a jour la saute (le C genere et build\ restent, la compilation ne
+# reprend que les fichiers modifies).
+function Empreinte-Texte($t) {
+    $b = [Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($t))
+    return ([BitConverter]::ToString($b) -replace '-', '')
+}
+$entrees = @("xbe $XbeSha1")
+foreach ($f in @("icall_seeds.json", "xpp_seeds.json", "interp_seeds.json", "misc_seeds.json", "outils\patch_gen.py")) {
+    $p = Join-Path $Projet $f
+    $entrees += "$f $(if (Test-Path $p) { Sha1 $p } else { '-' })"
+}
+Get-ChildItem (Join-Path $Toolkit "tools") -Recurse -File -Include *.py, *.json |
+    Sort-Object FullName | ForEach-Object { $entrees += "$($_.FullName.Substring($Toolkit.Length)) $(Sha1 $_.FullName)" }
+$manuel = [IO.File]::ReadAllText((Join-Path $Projet "src\recomp_manual.c"))
+$entrees += "manuel " + (([regex]::Matches($manuel, 'sub_[0-9A-Fa-f]{8}(?:_gen|_patch)?') | ForEach-Object { $_.Value } | Sort-Object -Unique) -join ',')
+$empreinte = Empreinte-Texte ($entrees -join "`n")
+$tampon = Join-Path $Pipe "entrees.txt"
+$sauter = $MiseAJour -and (Test-Path $tampon) -and ((Get-Content $tampon -Raw).Trim() -eq $empreinte) -and
+          (Test-Path (Join-Path $Gen "recomp_types.h")) -and (Test-Path (Join-Path $Projet "src\recomp_patch.c"))
+if ($sauter) {
+    Ecrire (L "  traduction inchangée depuis la dernière installation : sautée" "  translation unchanged since the last install: skipped") "Green"
+} else {
 Ecrire (L "  traduction en C" "  translation to C")
 Get-ChildItem $Gen -Include recomp_0*.c, recomp_dispatch.c, recomp_stubs_unresolved.c, recomp_funcs.h -Recurse -ErrorAction SilentlyContinue | Remove-Item
 Lancer (L "traduction en C" "translation to C") $py ($pyArgs + @("-m", "tools.recomp", $XbeDest, "--all", "--split", "1000", "--game-name", "DefJam",
@@ -338,6 +367,8 @@ Ecrire ((L "  $n fichiers de C générés dans src\recomp\gen" "  $n C files gen
 # jamais distribuees (outils\patch_gen.py).
 Ecrire (L "  corrections du C généré" "  patches to the generated C")
 Lancer (L "corrections du C généré" "patches to the generated C") $py ($pyArgs + @((Join-Path $Projet "outils\patch_gen.py")))
+Set-Content -Path $tampon -Value $empreinte -Encoding ASCII
+}
 
 # ── 5. La compilation ──────────────────────────────────────────────────
 

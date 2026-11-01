@@ -22,9 +22,10 @@ Download **`DJFFNY.exe`** from the latest [release](../../releases/latest) and r
 - **installation**: folder, build (Clang, all included, or MSVC + DLSS), disc image check, then download of the chosen package, extraction, translation to C and build, with progress and a live log;
 - **game settings**: resolution, 4:3 or 16:9, DLSS, filtering, HD texture pack, unlock everything, controller layout;
 - **mods**: install a `.mod` file (a zip with a `mod.ini`), one at a time, removable;
-- **the game**: the Play button, and update notices.
+- **the game**: the Play button;
+- **updates**: the launcher updates itself, and a game update only downloads and rebuilds what changed — no disc image needed, no new extraction, and the translation to C is skipped when its inputs did not change.
 
-It installs itself next to the game with a desktop shortcut. It uses WebView2, already part of Windows 10 and 11.
+It speaks English, French, Spanish, German and Portuguese, following Windows' language (or the one picked in Settings). It installs itself next to the game with a desktop shortcut. It uses WebView2, already part of Windows 10 and 11.
 
 ### 2. With a release package, by hand
 

@@ -73,23 +73,498 @@ main{flex:1;min-width:0;position:relative;overflow:hidden;background:#141414;}
 <script>
 'use strict';
 const RES = [[640,480],[1280,960],[1920,1440],[2560,1920],[3200,2400],[3840,2880]];
-const STEPS = ['Téléchargement','Vérification du disque','Extraction','Recompilation vers C','Compilation','Finitions'];
 const GREEN = 'oklch(0.74 0.15 150)', ERR = 'oklch(0.66 0.19 22)';
 const DEFAULTS = { res: 3, aspect: '16:9', cutsceneFull: true, menus43: false, dlss: 'off', fullscreen: false,
   bilinear: true, mips: true, effects: true, hdPack: false, hdPath: '', mods: true, unlockAll: false, xboxPad: false };
 const mmss = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.floor(s % 60)).padStart(2, '0');
 const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// ---------- les langues ----------
+// Une cle par phrase ; {a} et {b} sont remplaces par les valeurs passees a t(). Le francais est la
+// reference ; une cle absente d'une langue retombe sur l'anglais.
+const LANGS = { fr: 'Français', en: 'English', es: 'Español', de: 'Deutsch', pt: 'Português' };
+const TX = {
+fr: {
+  play: 'Jouer', settings: 'Réglages', mods: 'Mods', install: 'Installation', log: 'Journal', about: 'À propos',
+  tagline: 'XBOX · 2004 · PORT PC NON OFFICIEL', playBig: 'JOUER', running: 'EN COURS',
+  modsOff: 'Mods désactivés', modOn: 'Mod : {a}', noModShort: 'Aucun mod',
+  updGame: 'Mise à jour disponible : {a}', updGameNote: 'Seuls les fichiers modifiés sont téléchargés et recompilés. Vos réglages et votre mod sont conservés.',
+  updLauncher: 'Nouvelle version du lanceur : {a}', updLauncherNote: 'Le lanceur se met à jour et redémarre en quelques secondes.',
+  update: 'Mettre à jour', later: 'Plus tard',
+  confUpdT: 'METTRE À JOUR ?', confUpdB: 'La version {a} sera installée. Seuls les fichiers modifiés sont recompilés ; votre image disque n\'est pas nécessaire. Vos réglages et votre mod sont conservés.',
+  launcherUpdating: 'Mise à jour du lanceur', launcherUpdatingX: 'Il redémarre dans un instant.',
+  settingsH: 'RÉGLAGES', settingsSub: 'Appliqués au prochain lancement du jeu.',
+  secImage: 'IMAGE', secTextures: 'TEXTURES', secGame: 'JEU', secLauncher: 'LANCEUR',
+  res: 'Résolution interne', resD: 'Rendu interne du jeu, multiple de la résolution Xbox d\'origine.',
+  aspect: 'Format d\'image', aspectD: '4:3 respecte le jeu original. 16:9 élargit le champ de vision.',
+  cine: 'Cinématiques en pleine hauteur', cineD: 'Recadre les cinématiques pour remplir un écran 16:9.',
+  menus43: 'Menus conservés en 4:3', menus43D: 'Garde les menus et l\'interface au format d\'origine, sans les étirer.',
+  only169: 'Disponible en 16:9 uniquement.',
+  dlssD: 'DLAA améliore l\'anticrénelage sur les cartes NVIDIA RTX.', dlssNo: 'Indisponible avec cette version. Installez la version MSVC + DLSS depuis Installation.',
+  full: 'Plein écran au démarrage', fullD: 'F11 bascule entre fenêtre et plein écran en jeu.',
+  bil: 'Filtrage bilinéaire', bilD: 'Adoucit les textures agrandies.',
+  mips: 'Mipmaps + anisotrope 16×', mipsD: 'Textures nettes au loin, sans scintillement.',
+  fx: 'Effets de rendu', fxD: 'Reflets au sol et éclairage des salles.',
+  hd: 'Pack de textures HD', hdD: 'Remplace les textures d\'origine par celles du dossier choisi.',
+  hdDir: 'Dossier du pack HD', hdDirD: 'Les images y sont nommées par leur empreinte (voir le README).', noFolder: 'Aucun dossier choisi', browse: 'Parcourir…',
+  modOnT: 'Mod activé', modOnD: 'Charge le mod installé au lancement du jeu.',
+  unlock: 'Tout débloquer', unlockD: 'Personnages, lieux de combat et 10 000 points dès le départ.',
+  pad: 'Disposition de manette Xbox d\'origine', padD: 'LT/RT pour les gâchettes, LB/RB pour les boutons noir et blanc.',
+  lang: 'Langue', langD: 'Langue du lanceur.', langAuto: 'Automatique (Windows)',
+  unsaved: 'Modifications non enregistrées', cancel: 'Annuler', allSaved: 'Tous les réglages sont enregistrés.', save: 'Enregistrer', saveAndPlay: 'Enregistrer et jouer',
+  saved: 'Réglages enregistrés', savedX: 'Ils seront appliqués au prochain lancement.',
+  modsSub: 'Un seul mod actif à la fois : en installer un nouveau remplace le précédent.', modsSubOff: ' Mods désactivés dans Réglages.',
+  modsFolder: 'Ouvrir le dossier des mods', installModBtn: 'Installer un fichier .mod',
+  dropBusy: 'Installation en cours…', dropReplace: 'Relâchez pour remplacer « {a} »', dropInstall: 'Relâchez pour installer',
+  dropHintReplace: 'Déposez un fichier .mod ici pour remplacer le mod actuel', dropHint: 'Déposez un fichier .mod ici pour l\'installer',
+  noModH: 'AUCUN MOD INSTALLÉ', noModP: 'Les mods remplacent des personnages, des textures, des sons ou des modèles du jeu. Déposez un fichier .mod ici, ou choisissez-le sur votre ordinateur.',
+  chooseMod: 'Choisir un fichier .mod', files: '{a} fichiers', remove: 'Retirer', installing: 'Installation…', newMod: 'Nouveau mod',
+  busyT: 'Installation déjà en cours', busyX: 'Patientez jusqu\'à la fin de l\'installation.',
+  replaceT: 'REMPLACER « {a} » ?', replaceB: 'Un seul mod peut être actif. « {a} » sera retiré et remplacé par le nouveau mod.', replace: 'Remplacer',
+  removeT: 'RETIRER « {a} » ?', removeB: 'Les {a} fichiers de ce mod seront supprimés du dossier des mods, et ce qu\'il avait remplacé sera remis. Vous pourrez le réinstaller plus tard depuis son fichier .mod.',
+  oneFile: 'Un seul fichier à la fois', oneFileX: 'Seul « {a} » sera pris.',
+  installH: 'INSTALLATION', current: 'INSTALLATION ACTUELLE', folder: 'Dossier', open: 'Ouvrir', version: 'Version', builtOn: 'compilée le {a}',
+  disc: 'Image disque', verified: 'vérifiée', actions: 'ACTIONS',
+  switchT: 'Changer de version', switchToClang: 'Passer à Clang, tout compris : rien à installer, mais sans DLSS. Le jeu sera recompilé.',
+  switchToMsvc: 'Passer à MSVC + DLSS. Nécessite Visual Studio 2022 avec le C++. Le jeu sera recompilé.', switchTo: 'Passer à {a}',
+  repairT: 'Réparer / réinstaller', repairD: 'Recompile le jeu depuis votre image disque. Vos réglages et votre mod sont conservés.', repair: 'Réparer',
+  uninstT: 'Désinstaller', uninstD: 'Supprime le jeu recompilé et ses fichiers. Votre image disque n\'est pas modifiée.',
+  confSwitchT: 'PASSER À {a} ?', confSwitchMsvc: 'Le jeu sera recompilé avec Visual Studio. Vos réglages et votre mod sont conservés.',
+  confSwitchClang: 'Le jeu sera recompilé avec Clang. Le DLSS ne sera plus disponible. Vos réglages et votre mod sont conservés.', recompile: 'Recompiler',
+  confRepairT: 'RÉPARER L\'INSTALLATION ?', confRepairB: 'Le jeu sera recompilé depuis votre image disque. Vos réglages et votre mod sont conservés.',
+  confUninstT: 'DÉSINSTALLER LE JEU ?', confUninstB: 'Le jeu recompilé sera supprimé de {a}, avec votre mod et vos réglages. Votre image disque n\'est pas modifiée.',
+  uninstalled: 'Jeu désinstallé', uninstalledX: 'Votre image disque n\'a pas été modifiée.',
+  wFolder: 'Dossier', wVersion: 'Version', wDisc: 'Image disque', wInstall: 'Installation',
+  whereH: 'OÙ INSTALLER LE JEU ?', whereP: 'Le jeu est reconstruit à partir de votre propre disque. Aucun fichier du jeu n\'est téléchargé.',
+  installDir: 'Dossier d\'installation', freeOn: '{a} libres sur {b}', required: 'Espace requis : environ {a}',
+  pickH: 'CHOISISSEZ UNE VERSION', pickP: 'Vous pourrez changer plus tard depuis la page Installation.', recommended: 'RECOMMANDÉ',
+  clangT: 'Clang, tout compris', clang1: 'Rien à installer', clang2: 'Téléchargement d\'environ {a}', clang3: 'Pas de DLSS',
+  msvc1: 'Nécessite Visual Studio 2022 (C++)', msvc2: 'DLSS / DLAA pour cartes NVIDIA RTX', msvc3: 'Téléchargement d\'environ {a}',
+  vsFound: '{a} détecté', vsMissing: 'Visual Studio 2022 avec le C++ n\'est pas installé.',
+  vsMissingT: 'Visual Studio introuvable', vsMissingX: 'Installez Visual Studio 2022 avec le C++, ou choisissez la version Clang.',
+  discH: 'IMAGE DU DISQUE', discP: 'Sélectionnez l\'image .iso de votre disque Xbox. Seule la version USA est prise en charge.',
+  analysing: 'Analyse de l\'image…', dropIso: 'Déposez un fichier .iso ici', orClick: ' ou cliquez pour parcourir',
+  isoValidD: 'Image valide. Version USA (NTSC-U) vérifiée.', isoEuropeT: 'Version Europe détectée', isoEuropeD: 'Seule la version USA est prise en charge. Choisissez une autre image.',
+  isoOtherT: 'Version non prise en charge', isoOtherD: 'Ce n\'est pas la version USA de Def Jam: Fight for NY. Choisissez une autre image.',
+  isoBadT: 'Fichier illisible', isoBadD: 'Le fichier est incomplet, corrompu ou n\'est pas une image de disque Xbox.',
+  needIsoT: 'Image disque introuvable', needIsoX: 'Elle a été déplacée ou supprimée. Choisissez-la à nouveau.',
+  s0: 'Téléchargement', s1: 'Vérification du disque', s2: 'Extraction', s3: 'Recompilation vers C', s4: 'Compilation', s5: 'Finitions',
+  stepOf: 'Étape {a} sur {b}', elapsed: 'Temps écoulé {a}', remaining: 'Restant environ {a}',
+  readyH: 'LE JEU EST PRÊT', readyP: 'Recompilé en {a}', failH: 'L\'INSTALLATION A ÉCHOUÉ', failP: 'L\'installation s\'est arrêtée à l\'étape {a} sur 6. Votre image disque n\'a pas été modifiée.',
+  openLog: 'Ouvrir le journal', retry: 'Réessayer', hideLog: 'Masquer le journal', showLog: 'Afficher le journal', lines: '{a} lignes',
+  back: 'Retour', next: 'Suivant', startInstall: 'Lancer l\'installation',
+  confCancelT: 'ANNULER L\'INSTALLATION ?', confCancelB: 'La progression sera perdue et les fichiers temporaires supprimés. Votre image disque n\'est pas modifiée.',
+  cancelInstall: 'Annuler l\'installation', continue: 'Continuer',
+  cancelled: 'Installation annulée', cancelledX: 'Les fichiers téléchargés ont été supprimés.',
+  aboutP: 'Port PC non officiel, réalisé par des fans. Ce projet n\'est affilié ni à Electronic Arts, ni à Def Jam Recordings, ni à AKI Corporation. Aucun fichier du jeu n\'est distribué : le jeu est reconstruit à partir de votre propre image disque.',
+  licences: 'LICENCES', source: 'Code source', licTexts: 'Textes complets des licences',
+  licPort: 'Ce port (lanceur et runtime)', licSdk: 'Licence du SDK Microsoft', licNvidia: 'Licence NVIDIA',
+  // messages de l'exe
+  notMod: 'Ce fichier n\'est pas un mod', notModX: 'Un fichier .mod est une archive zip avec un mod.ini à la racine.',
+  modIncomplete: 'Installation du mod incomplète', modIncompleteX: 'L\'extraction a échoué (code {a}).',
+  modInstalled: 'Mod installé', modInstalledX: '{a} sera chargé au prochain lancement.',
+  notInstalled: 'Le jeu n\'est pas installé', notInstalledX: 'Installez-le depuis la page Installation.',
+  launchRefused: 'Le jeu n\'a pas pu démarrer', launchRefusedX: 'Windows a refusé de lancer defjam_recomp.exe (erreur {a}).',
+  launchFailed: 'Le jeu n\'a pas pu démarrer', launchFailedX: 'defjam_recomp.exe a quitté avec le code {a}. Consultez le journal.',
+  settingsNotSaved: 'Réglages non enregistrés', settingsNotSavedX: 'Impossible d\'écrire defjam.ini.',
+  modRemoved: 'Mod retiré', modRemovedX: 'Les fichiers qu\'il remplaçait ont été remis.',
+  noLog: 'Pas encore de journal', noLogX: 'Le journal du jeu est écrit pendant une partie.',
+  uninstallIncomplete: 'Désinstallation incomplète', uninstallIncompleteX: 'Certains fichiers sont encore utilisés. Fermez le jeu et réessayez.',
+  launcherUpdateFailed: 'Mise à jour du lanceur impossible', launcherUpdateFailedX: 'Le téléchargement a échoué ({a}). Réessayez plus tard.',
+  // erreurs d'installation
+  e_noDir: 'aucun dossier d\'installation', e_localCopy: 'copie du paquet local impossible', e_download: 'téléchargement impossible : {a}',
+  e_badPackage: 'le paquet téléchargé est illisible', e_placeFailed: 'impossible de placer les fichiers ({a})',
+  e_installerStopped: 'l\'installateur s\'est arrêté (code {a})', e_installer: '{a}',
+  GB: 'Go', MB: 'Mo', TB: 'To'
+},
+en: {
+  play: 'Play', settings: 'Settings', mods: 'Mods', install: 'Installation', log: 'Log', about: 'About',
+  tagline: 'XBOX · 2004 · UNOFFICIAL PC PORT', playBig: 'PLAY', running: 'RUNNING',
+  modsOff: 'Mods disabled', modOn: 'Mod: {a}', noModShort: 'No mod',
+  updGame: 'Update available: {a}', updGameNote: 'Only the changed files are downloaded and recompiled. Your settings and your mod are kept.',
+  updLauncher: 'New launcher version: {a}', updLauncherNote: 'The launcher updates itself and restarts in a few seconds.',
+  update: 'Update', later: 'Later',
+  confUpdT: 'UPDATE?', confUpdB: 'Version {a} will be installed. Only the changed files are recompiled; your disc image is not needed. Your settings and your mod are kept.',
+  launcherUpdating: 'Updating the launcher', launcherUpdatingX: 'It will restart in a moment.',
+  settingsH: 'SETTINGS', settingsSub: 'Applied the next time the game starts.',
+  secImage: 'PICTURE', secTextures: 'TEXTURES', secGame: 'GAME', secLauncher: 'LAUNCHER',
+  res: 'Internal resolution', resD: 'The game\'s internal rendering, a multiple of the original Xbox resolution.',
+  aspect: 'Aspect ratio', aspectD: '4:3 keeps the original game. 16:9 widens the field of view.',
+  cine: 'Full-height cutscenes', cineD: 'Crops cutscenes to fill a 16:9 screen.',
+  menus43: 'Keep menus in 4:3', menus43D: 'Keeps the menus and the interface in their original format, unstretched.',
+  only169: 'Only available in 16:9.',
+  dlssD: 'DLAA improves anti-aliasing on NVIDIA RTX cards.', dlssNo: 'Not available in this build. Install the MSVC + DLSS build from Installation.',
+  full: 'Fullscreen at start', fullD: 'F11 toggles between window and fullscreen in game.',
+  bil: 'Bilinear filtering', bilD: 'Smooths enlarged textures.',
+  mips: 'Mipmaps + 16× anisotropic', mipsD: 'Sharp textures in the distance, without shimmering.',
+  fx: 'Render effects', fxD: 'Floor reflections and venue lighting.',
+  hd: 'HD texture pack', hdD: 'Replaces the original textures with those of the chosen folder.',
+  hdDir: 'HD pack folder', hdDirD: 'Its images are named after their fingerprint (see the README).', noFolder: 'No folder chosen', browse: 'Browse…',
+  modOnT: 'Mod enabled', modOnD: 'Loads the installed mod when the game starts.',
+  unlock: 'Unlock everything', unlockD: 'Characters, venues and 10,000 points from the start.',
+  pad: 'Original Xbox controller layout', padD: 'LT/RT for the triggers, LB/RB for the black and white buttons.',
+  lang: 'Language', langD: 'The launcher\'s language.', langAuto: 'Automatic (Windows)',
+  unsaved: 'Unsaved changes', cancel: 'Cancel', allSaved: 'All settings are saved.', save: 'Save', saveAndPlay: 'Save and play',
+  saved: 'Settings saved', savedX: 'They will apply the next time the game starts.',
+  modsSub: 'One mod at a time: installing a new one replaces the previous one.', modsSubOff: ' Mods are disabled in Settings.',
+  modsFolder: 'Open the mods folder', installModBtn: 'Install a .mod file',
+  dropBusy: 'Installing…', dropReplace: 'Drop to replace "{a}"', dropInstall: 'Drop to install',
+  dropHintReplace: 'Drop a .mod file here to replace the current mod', dropHint: 'Drop a .mod file here to install it',
+  noModH: 'NO MOD INSTALLED', noModP: 'Mods replace fighters, textures, sounds or models of the game. Drop a .mod file here, or pick it on your computer.',
+  chooseMod: 'Choose a .mod file', files: '{a} files', remove: 'Remove', installing: 'Installing…', newMod: 'New mod',
+  busyT: 'Already installing', busyX: 'Wait until the installation ends.',
+  replaceT: 'REPLACE "{a}"?', replaceB: 'Only one mod can be active. "{a}" will be removed and replaced by the new mod.', replace: 'Replace',
+  removeT: 'REMOVE "{a}"?', removeB: 'The {a} files of this mod will be deleted from the mods folder, and what it replaced will be put back. You can reinstall it later from its .mod file.',
+  oneFile: 'One file at a time', oneFileX: 'Only "{a}" will be used.',
+  installH: 'INSTALLATION', current: 'CURRENT INSTALLATION', folder: 'Folder', open: 'Open', version: 'Build', builtOn: 'built on {a}',
+  disc: 'Disc image', verified: 'verified', actions: 'ACTIONS',
+  switchT: 'Change build', switchToClang: 'Switch to Clang, all included: nothing to install, but no DLSS. The game will be recompiled.',
+  switchToMsvc: 'Switch to MSVC + DLSS. Needs Visual Studio 2022 with C++. The game will be recompiled.', switchTo: 'Switch to {a}',
+  repairT: 'Repair / reinstall', repairD: 'Recompiles the game from your disc image. Your settings and your mod are kept.', repair: 'Repair',
+  uninstT: 'Uninstall', uninstD: 'Deletes the recompiled game and its files. Your disc image is not changed.',
+  confSwitchT: 'SWITCH TO {a}?', confSwitchMsvc: 'The game will be recompiled with Visual Studio. Your settings and your mod are kept.',
+  confSwitchClang: 'The game will be recompiled with Clang. DLSS will no longer be available. Your settings and your mod are kept.', recompile: 'Recompile',
+  confRepairT: 'REPAIR THE INSTALLATION?', confRepairB: 'The game will be recompiled from your disc image. Your settings and your mod are kept.',
+  confUninstT: 'UNINSTALL THE GAME?', confUninstB: 'The recompiled game will be deleted from {a}, with your mod and your settings. Your disc image is not changed.',
+  uninstalled: 'Game uninstalled', uninstalledX: 'Your disc image was not changed.',
+  wFolder: 'Folder', wVersion: 'Build', wDisc: 'Disc image', wInstall: 'Installation',
+  whereH: 'WHERE TO INSTALL THE GAME?', whereP: 'The game is rebuilt from your own disc. No game file is downloaded.',
+  installDir: 'Install folder', freeOn: '{a} free on {b}', required: 'Space needed: about {a}',
+  pickH: 'CHOOSE A BUILD', pickP: 'You can change it later from the Installation page.', recommended: 'RECOMMENDED',
+  clangT: 'Clang, all included', clang1: 'Nothing to install', clang2: 'About {a} to download', clang3: 'No DLSS',
+  msvc1: 'Needs Visual Studio 2022 (C++)', msvc2: 'DLSS / DLAA for NVIDIA RTX cards', msvc3: 'About {a} to download',
+  vsFound: '{a} found', vsMissing: 'Visual Studio 2022 with C++ is not installed.',
+  vsMissingT: 'Visual Studio not found', vsMissingX: 'Install Visual Studio 2022 with C++, or choose the Clang build.',
+  discH: 'DISC IMAGE', discP: 'Select the .iso image of your Xbox disc. Only the USA version is supported.',
+  analysing: 'Checking the image…', dropIso: 'Drop an .iso file here', orClick: ' or click to browse',
+  isoValidD: 'Valid image. USA version (NTSC-U) verified.', isoEuropeT: 'European version detected', isoEuropeD: 'Only the USA version is supported. Choose another image.',
+  isoOtherT: 'Unsupported version', isoOtherD: 'This is not the USA version of Def Jam: Fight for NY. Choose another image.',
+  isoBadT: 'Unreadable file', isoBadD: 'The file is incomplete, damaged, or not an Xbox disc image.',
+  needIsoT: 'Disc image not found', needIsoX: 'It was moved or deleted. Choose it again.',
+  s0: 'Download', s1: 'Disc check', s2: 'Extraction', s3: 'Translation to C', s4: 'Build', s5: 'Finishing',
+  stepOf: 'Step {a} of {b}', elapsed: 'Elapsed {a}', remaining: 'About {a} left',
+  readyH: 'THE GAME IS READY', readyP: 'Recompiled in {a}', failH: 'THE INSTALLATION FAILED', failP: 'The installation stopped at step {a} of 6. Your disc image was not changed.',
+  openLog: 'Open the log', retry: 'Retry', hideLog: 'Hide the log', showLog: 'Show the log', lines: '{a} lines',
+  back: 'Back', next: 'Next', startInstall: 'Start the installation',
+  confCancelT: 'CANCEL THE INSTALLATION?', confCancelB: 'The progress will be lost and the temporary files deleted. Your disc image is not changed.',
+  cancelInstall: 'Cancel the installation', continue: 'Continue',
+  cancelled: 'Installation cancelled', cancelledX: 'The downloaded files were deleted.',
+  aboutP: 'Unofficial PC port, made by fans. This project is affiliated with neither Electronic Arts, nor Def Jam Recordings, nor AKI Corporation. No game file is distributed: the game is rebuilt from your own disc image.',
+  licences: 'LICENCES', source: 'Source code', licTexts: 'Full licence texts',
+  licPort: 'This port (launcher and runtime)', licSdk: 'Microsoft SDK licence', licNvidia: 'NVIDIA licence',
+  notMod: 'This file is not a mod', notModX: 'A .mod file is a zip archive with a mod.ini at its root.',
+  modIncomplete: 'Mod installation incomplete', modIncompleteX: 'The extraction failed (code {a}).',
+  modInstalled: 'Mod installed', modInstalledX: '{a} will load the next time the game starts.',
+  notInstalled: 'The game is not installed', notInstalledX: 'Install it from the Installation page.',
+  launchRefused: 'The game could not start', launchRefusedX: 'Windows refused to start defjam_recomp.exe (error {a}).',
+  launchFailed: 'The game could not start', launchFailedX: 'defjam_recomp.exe exited with code {a}. Check the log.',
+  settingsNotSaved: 'Settings not saved', settingsNotSavedX: 'Could not write defjam.ini.',
+  modRemoved: 'Mod removed', modRemovedX: 'The files it replaced were put back.',
+  noLog: 'No log yet', noLogX: 'The game\'s log is written while you play.',
+  uninstallIncomplete: 'Uninstall incomplete', uninstallIncompleteX: 'Some files are still in use. Close the game and try again.',
+  launcherUpdateFailed: 'Could not update the launcher', launcherUpdateFailedX: 'The download failed ({a}). Try again later.',
+  e_noDir: 'no install folder', e_localCopy: 'could not copy the local package', e_download: 'download failed: {a}',
+  e_badPackage: 'the downloaded package is unreadable', e_placeFailed: 'could not place the files ({a})',
+  e_installerStopped: 'the installer stopped (code {a})', e_installer: '{a}',
+  GB: 'GB', MB: 'MB', TB: 'TB'
+},
+es: {
+  play: 'Jugar', settings: 'Ajustes', mods: 'Mods', install: 'Instalación', log: 'Registro', about: 'Acerca de',
+  tagline: 'XBOX · 2004 · PORT NO OFICIAL PARA PC', playBig: 'JUGAR', running: 'EN CURSO',
+  modsOff: 'Mods desactivados', modOn: 'Mod: {a}', noModShort: 'Sin mod',
+  updGame: 'Actualización disponible: {a}', updGameNote: 'Solo se descargan y recompilan los archivos modificados. Se conservan tus ajustes y tu mod.',
+  updLauncher: 'Nueva versión del lanzador: {a}', updLauncherNote: 'El lanzador se actualiza y se reinicia en unos segundos.',
+  update: 'Actualizar', later: 'Más tarde',
+  confUpdT: '¿ACTUALIZAR?', confUpdB: 'Se instalará la versión {a}. Solo se recompilan los archivos modificados; no hace falta la imagen de disco. Se conservan tus ajustes y tu mod.',
+  launcherUpdating: 'Actualizando el lanzador', launcherUpdatingX: 'Se reiniciará en un momento.',
+  settingsH: 'AJUSTES', settingsSub: 'Se aplican la próxima vez que se inicie el juego.',
+  secImage: 'IMAGEN', secTextures: 'TEXTURAS', secGame: 'JUEGO', secLauncher: 'LANZADOR',
+  res: 'Resolución interna', resD: 'Renderizado interno del juego, múltiplo de la resolución original de Xbox.',
+  aspect: 'Relación de aspecto', aspectD: '4:3 respeta el juego original. 16:9 amplía el campo de visión.',
+  cine: 'Cinemáticas a altura completa', cineD: 'Recorta las cinemáticas para llenar una pantalla 16:9.',
+  menus43: 'Mantener los menús en 4:3', menus43D: 'Mantiene los menús y la interfaz en su formato original, sin estirarlos.',
+  only169: 'Solo disponible en 16:9.',
+  dlssD: 'DLAA mejora el antialiasing en las tarjetas NVIDIA RTX.', dlssNo: 'No disponible en esta versión. Instala la versión MSVC + DLSS desde Instalación.',
+  full: 'Pantalla completa al iniciar', fullD: 'F11 alterna entre ventana y pantalla completa en el juego.',
+  bil: 'Filtrado bilineal', bilD: 'Suaviza las texturas ampliadas.',
+  mips: 'Mipmaps + anisotrópico 16×', mipsD: 'Texturas nítidas a distancia, sin parpadeo.',
+  fx: 'Efectos de renderizado', fxD: 'Reflejos en el suelo e iluminación de los escenarios.',
+  hd: 'Pack de texturas HD', hdD: 'Sustituye las texturas originales por las de la carpeta elegida.',
+  hdDir: 'Carpeta del pack HD', hdDirD: 'Sus imágenes se nombran según su huella (ver el README).', noFolder: 'Ninguna carpeta elegida', browse: 'Examinar…',
+  modOnT: 'Mod activado', modOnD: 'Carga el mod instalado al iniciar el juego.',
+  unlock: 'Desbloquear todo', unlockD: 'Personajes, escenarios y 10 000 puntos desde el principio.',
+  pad: 'Distribución original del mando de Xbox', padD: 'LT/RT para los gatillos, LB/RB para los botones negro y blanco.',
+  lang: 'Idioma', langD: 'Idioma del lanzador.', langAuto: 'Automático (Windows)',
+  unsaved: 'Cambios sin guardar', cancel: 'Cancelar', allSaved: 'Todos los ajustes están guardados.', save: 'Guardar', saveAndPlay: 'Guardar y jugar',
+  saved: 'Ajustes guardados', savedX: 'Se aplicarán la próxima vez que se inicie el juego.',
+  modsSub: 'Un solo mod activo a la vez: instalar uno nuevo sustituye al anterior.', modsSubOff: ' Mods desactivados en Ajustes.',
+  modsFolder: 'Abrir la carpeta de mods', installModBtn: 'Instalar un archivo .mod',
+  dropBusy: 'Instalando…', dropReplace: 'Suelta para sustituir «{a}»', dropInstall: 'Suelta para instalar',
+  dropHintReplace: 'Suelta aquí un archivo .mod para sustituir el mod actual', dropHint: 'Suelta aquí un archivo .mod para instalarlo',
+  noModH: 'NINGÚN MOD INSTALADO', noModP: 'Los mods sustituyen personajes, texturas, sonidos o modelos del juego. Suelta aquí un archivo .mod o elígelo en tu ordenador.',
+  chooseMod: 'Elegir un archivo .mod', files: '{a} archivos', remove: 'Quitar', installing: 'Instalando…', newMod: 'Nuevo mod',
+  busyT: 'Ya hay una instalación en curso', busyX: 'Espera a que termine la instalación.',
+  replaceT: '¿SUSTITUIR «{a}»?', replaceB: 'Solo puede haber un mod activo. «{a}» se quitará y se sustituirá por el nuevo mod.', replace: 'Sustituir',
+  removeT: '¿QUITAR «{a}»?', removeB: 'Los {a} archivos de este mod se borrarán de la carpeta de mods y se restaurará lo que había sustituido. Podrás reinstalarlo más tarde desde su archivo .mod.',
+  oneFile: 'Un solo archivo a la vez', oneFileX: 'Solo se usará «{a}».',
+  installH: 'INSTALACIÓN', current: 'INSTALACIÓN ACTUAL', folder: 'Carpeta', open: 'Abrir', version: 'Versión', builtOn: 'compilada el {a}',
+  disc: 'Imagen de disco', verified: 'verificada', actions: 'ACCIONES',
+  switchT: 'Cambiar de versión', switchToClang: 'Pasar a Clang, todo incluido: nada que instalar, pero sin DLSS. El juego se recompilará.',
+  switchToMsvc: 'Pasar a MSVC + DLSS. Requiere Visual Studio 2022 con C++. El juego se recompilará.', switchTo: 'Pasar a {a}',
+  repairT: 'Reparar / reinstalar', repairD: 'Recompila el juego desde tu imagen de disco. Se conservan tus ajustes y tu mod.', repair: 'Reparar',
+  uninstT: 'Desinstalar', uninstD: 'Borra el juego recompilado y sus archivos. Tu imagen de disco no se modifica.',
+  confSwitchT: '¿PASAR A {a}?', confSwitchMsvc: 'El juego se recompilará con Visual Studio. Se conservan tus ajustes y tu mod.',
+  confSwitchClang: 'El juego se recompilará con Clang. El DLSS ya no estará disponible. Se conservan tus ajustes y tu mod.', recompile: 'Recompilar',
+  confRepairT: '¿REPARAR LA INSTALACIÓN?', confRepairB: 'El juego se recompilará desde tu imagen de disco. Se conservan tus ajustes y tu mod.',
+  confUninstT: '¿DESINSTALAR EL JUEGO?', confUninstB: 'El juego recompilado se borrará de {a}, con tu mod y tus ajustes. Tu imagen de disco no se modifica.',
+  uninstalled: 'Juego desinstalado', uninstalledX: 'Tu imagen de disco no se ha modificado.',
+  wFolder: 'Carpeta', wVersion: 'Versión', wDisc: 'Imagen de disco', wInstall: 'Instalación',
+  whereH: '¿DÓNDE INSTALAR EL JUEGO?', whereP: 'El juego se reconstruye a partir de tu propio disco. No se descarga ningún archivo del juego.',
+  installDir: 'Carpeta de instalación', freeOn: '{a} libres en {b}', required: 'Espacio necesario: unos {a}',
+  pickH: 'ELIGE UNA VERSIÓN', pickP: 'Podrás cambiarla más tarde desde la página Instalación.', recommended: 'RECOMENDADO',
+  clangT: 'Clang, todo incluido', clang1: 'Nada que instalar', clang2: 'Descarga de unos {a}', clang3: 'Sin DLSS',
+  msvc1: 'Requiere Visual Studio 2022 (C++)', msvc2: 'DLSS / DLAA para tarjetas NVIDIA RTX', msvc3: 'Descarga de unos {a}',
+  vsFound: '{a} detectado', vsMissing: 'Visual Studio 2022 con C++ no está instalado.',
+  vsMissingT: 'Visual Studio no encontrado', vsMissingX: 'Instala Visual Studio 2022 con C++ o elige la versión Clang.',
+  discH: 'IMAGEN DE DISCO', discP: 'Selecciona la imagen .iso de tu disco de Xbox. Solo se admite la versión USA.',
+  analysing: 'Analizando la imagen…', dropIso: 'Suelta aquí un archivo .iso', orClick: ' o haz clic para examinar',
+  isoValidD: 'Imagen válida. Versión USA (NTSC-U) verificada.', isoEuropeT: 'Versión europea detectada', isoEuropeD: 'Solo se admite la versión USA. Elige otra imagen.',
+  isoOtherT: 'Versión no compatible', isoOtherD: 'No es la versión USA de Def Jam: Fight for NY. Elige otra imagen.',
+  isoBadT: 'Archivo ilegible', isoBadD: 'El archivo está incompleto, dañado o no es una imagen de disco de Xbox.',
+  needIsoT: 'Imagen de disco no encontrada', needIsoX: 'Se ha movido o borrado. Vuelve a elegirla.',
+  s0: 'Descarga', s1: 'Comprobación del disco', s2: 'Extracción', s3: 'Traducción a C', s4: 'Compilación', s5: 'Últimos pasos',
+  stepOf: 'Paso {a} de {b}', elapsed: 'Tiempo transcurrido {a}', remaining: 'Quedan unos {a}',
+  readyH: 'EL JUEGO ESTÁ LISTO', readyP: 'Recompilado en {a}', failH: 'LA INSTALACIÓN HA FALLADO', failP: 'La instalación se detuvo en el paso {a} de 6. Tu imagen de disco no se ha modificado.',
+  openLog: 'Abrir el registro', retry: 'Reintentar', hideLog: 'Ocultar el registro', showLog: 'Mostrar el registro', lines: '{a} líneas',
+  back: 'Atrás', next: 'Siguiente', startInstall: 'Iniciar la instalación',
+  confCancelT: '¿CANCELAR LA INSTALACIÓN?', confCancelB: 'Se perderá el progreso y se borrarán los archivos temporales. Tu imagen de disco no se modifica.',
+  cancelInstall: 'Cancelar la instalación', continue: 'Continuar',
+  cancelled: 'Instalación cancelada', cancelledX: 'Se han borrado los archivos descargados.',
+  aboutP: 'Port no oficial para PC, hecho por fans. Este proyecto no está afiliado a Electronic Arts, ni a Def Jam Recordings, ni a AKI Corporation. No se distribuye ningún archivo del juego: el juego se reconstruye a partir de tu propia imagen de disco.',
+  licences: 'LICENCIAS', source: 'Código fuente', licTexts: 'Textos completos de las licencias',
+  licPort: 'Este port (lanzador y runtime)', licSdk: 'Licencia del SDK de Microsoft', licNvidia: 'Licencia de NVIDIA',
+  notMod: 'Este archivo no es un mod', notModX: 'Un archivo .mod es un zip con un mod.ini en la raíz.',
+  modIncomplete: 'Instalación del mod incompleta', modIncompleteX: 'La extracción ha fallado (código {a}).',
+  modInstalled: 'Mod instalado', modInstalledX: '{a} se cargará la próxima vez que se inicie el juego.',
+  notInstalled: 'El juego no está instalado', notInstalledX: 'Instálalo desde la página Instalación.',
+  launchRefused: 'El juego no ha podido iniciarse', launchRefusedX: 'Windows se ha negado a iniciar defjam_recomp.exe (error {a}).',
+  launchFailed: 'El juego no ha podido iniciarse', launchFailedX: 'defjam_recomp.exe se cerró con el código {a}. Consulta el registro.',
+  settingsNotSaved: 'Ajustes no guardados', settingsNotSavedX: 'No se ha podido escribir defjam.ini.',
+  modRemoved: 'Mod quitado', modRemovedX: 'Se han restaurado los archivos que sustituía.',
+  noLog: 'Todavía no hay registro', noLogX: 'El registro del juego se escribe durante una partida.',
+  uninstallIncomplete: 'Desinstalación incompleta', uninstallIncompleteX: 'Algunos archivos siguen en uso. Cierra el juego y vuelve a intentarlo.',
+  launcherUpdateFailed: 'No se pudo actualizar el lanzador', launcherUpdateFailedX: 'La descarga ha fallado ({a}). Inténtalo más tarde.',
+  e_noDir: 'ninguna carpeta de instalación', e_localCopy: 'no se pudo copiar el paquete local', e_download: 'descarga fallida: {a}',
+  e_badPackage: 'el paquete descargado es ilegible', e_placeFailed: 'no se pudieron colocar los archivos ({a})',
+  e_installerStopped: 'el instalador se detuvo (código {a})', e_installer: '{a}',
+  GB: 'GB', MB: 'MB', TB: 'TB'
+},
+de: {
+  play: 'Spielen', settings: 'Einstellungen', mods: 'Mods', install: 'Installation', log: 'Protokoll', about: 'Info',
+  tagline: 'XBOX · 2004 · INOFFIZIELLE PC-PORTIERUNG', playBig: 'SPIELEN', running: 'LÄUFT',
+  modsOff: 'Mods deaktiviert', modOn: 'Mod: {a}', noModShort: 'Kein Mod',
+  updGame: 'Update verfügbar: {a}', updGameNote: 'Nur die geänderten Dateien werden heruntergeladen und neu kompiliert. Deine Einstellungen und dein Mod bleiben erhalten.',
+  updLauncher: 'Neue Launcher-Version: {a}', updLauncherNote: 'Der Launcher aktualisiert sich und startet in wenigen Sekunden neu.',
+  update: 'Aktualisieren', later: 'Später',
+  confUpdT: 'AKTUALISIEREN?', confUpdB: 'Version {a} wird installiert. Nur die geänderten Dateien werden neu kompiliert; das Disc-Image wird nicht benötigt. Deine Einstellungen und dein Mod bleiben erhalten.',
+  launcherUpdating: 'Launcher wird aktualisiert', launcherUpdatingX: 'Er startet gleich neu.',
+  settingsH: 'EINSTELLUNGEN', settingsSub: 'Werden beim nächsten Spielstart übernommen.',
+  secImage: 'BILD', secTextures: 'TEXTUREN', secGame: 'SPIEL', secLauncher: 'LAUNCHER',
+  res: 'Interne Auflösung', resD: 'Interne Darstellung des Spiels, ein Vielfaches der ursprünglichen Xbox-Auflösung.',
+  aspect: 'Seitenverhältnis', aspectD: '4:3 entspricht dem Originalspiel. 16:9 erweitert das Sichtfeld.',
+  cine: 'Zwischensequenzen in voller Höhe', cineD: 'Beschneidet Zwischensequenzen, damit sie einen 16:9-Bildschirm füllen.',
+  menus43: 'Menüs in 4:3 belassen', menus43D: 'Behält Menüs und Oberfläche im Originalformat, ohne sie zu strecken.',
+  only169: 'Nur in 16:9 verfügbar.',
+  dlssD: 'DLAA verbessert die Kantenglättung auf NVIDIA-RTX-Karten.', dlssNo: 'In dieser Version nicht verfügbar. Installiere die Version MSVC + DLSS über Installation.',
+  full: 'Vollbild beim Start', fullD: 'F11 wechselt im Spiel zwischen Fenster und Vollbild.',
+  bil: 'Bilineare Filterung', bilD: 'Glättet vergrößerte Texturen.',
+  mips: 'Mipmaps + 16× anisotrop', mipsD: 'Scharfe Texturen in der Ferne, ohne Flimmern.',
+  fx: 'Render-Effekte', fxD: 'Bodenspiegelungen und Beleuchtung der Arenen.',
+  hd: 'HD-Texturpaket', hdD: 'Ersetzt die Originaltexturen durch die des gewählten Ordners.',
+  hdDir: 'Ordner des HD-Pakets', hdDirD: 'Die Bilder sind nach ihrem Fingerabdruck benannt (siehe README).', noFolder: 'Kein Ordner gewählt', browse: 'Durchsuchen…',
+  modOnT: 'Mod aktiviert', modOnD: 'Lädt den installierten Mod beim Spielstart.',
+  unlock: 'Alles freischalten', unlockD: 'Kämpfer, Arenen und 10.000 Punkte von Anfang an.',
+  pad: 'Original-Xbox-Controllerbelegung', padD: 'LT/RT für die Trigger, LB/RB für die schwarze und weiße Taste.',
+  lang: 'Sprache', langD: 'Sprache des Launchers.', langAuto: 'Automatisch (Windows)',
+  unsaved: 'Ungespeicherte Änderungen', cancel: 'Abbrechen', allSaved: 'Alle Einstellungen sind gespeichert.', save: 'Speichern', saveAndPlay: 'Speichern und spielen',
+  saved: 'Einstellungen gespeichert', savedX: 'Sie gelten beim nächsten Spielstart.',
+  modsSub: 'Immer nur ein aktiver Mod: Ein neuer ersetzt den vorherigen.', modsSubOff: ' Mods sind in den Einstellungen deaktiviert.',
+  modsFolder: 'Mod-Ordner öffnen', installModBtn: '.mod-Datei installieren',
+  dropBusy: 'Wird installiert…', dropReplace: 'Loslassen, um „{a}“ zu ersetzen', dropInstall: 'Loslassen zum Installieren',
+  dropHintReplace: 'Lege hier eine .mod-Datei ab, um den aktuellen Mod zu ersetzen', dropHint: 'Lege hier eine .mod-Datei ab, um sie zu installieren',
+  noModH: 'KEIN MOD INSTALLIERT', noModP: 'Mods ersetzen Kämpfer, Texturen, Sounds oder Modelle des Spiels. Lege hier eine .mod-Datei ab oder wähle sie auf deinem Computer aus.',
+  chooseMod: '.mod-Datei wählen', files: '{a} Dateien', remove: 'Entfernen', installing: 'Wird installiert…', newMod: 'Neuer Mod',
+  busyT: 'Installation läuft bereits', busyX: 'Warte, bis die Installation abgeschlossen ist.',
+  replaceT: '„{a}“ ERSETZEN?', replaceB: 'Es kann nur ein Mod aktiv sein. „{a}“ wird entfernt und durch den neuen Mod ersetzt.', replace: 'Ersetzen',
+  removeT: '„{a}“ ENTFERNEN?', removeB: 'Die {a} Dateien dieses Mods werden aus dem Mod-Ordner gelöscht, und was er ersetzt hat, wird wiederhergestellt. Du kannst ihn später über seine .mod-Datei neu installieren.',
+  oneFile: 'Immer nur eine Datei', oneFileX: 'Nur „{a}“ wird verwendet.',
+  installH: 'INSTALLATION', current: 'AKTUELLE INSTALLATION', folder: 'Ordner', open: 'Öffnen', version: 'Version', builtOn: 'kompiliert am {a}',
+  disc: 'Disc-Image', verified: 'geprüft', actions: 'AKTIONEN',
+  switchT: 'Version wechseln', switchToClang: 'Zu Clang wechseln, alles inklusive: nichts zu installieren, aber ohne DLSS. Das Spiel wird neu kompiliert.',
+  switchToMsvc: 'Zu MSVC + DLSS wechseln. Erfordert Visual Studio 2022 mit C++. Das Spiel wird neu kompiliert.', switchTo: 'Zu {a} wechseln',
+  repairT: 'Reparieren / neu installieren', repairD: 'Kompiliert das Spiel aus deinem Disc-Image neu. Deine Einstellungen und dein Mod bleiben erhalten.', repair: 'Reparieren',
+  uninstT: 'Deinstallieren', uninstD: 'Löscht das neu kompilierte Spiel und seine Dateien. Dein Disc-Image wird nicht verändert.',
+  confSwitchT: 'ZU {a} WECHSELN?', confSwitchMsvc: 'Das Spiel wird mit Visual Studio neu kompiliert. Deine Einstellungen und dein Mod bleiben erhalten.',
+  confSwitchClang: 'Das Spiel wird mit Clang neu kompiliert. DLSS ist dann nicht mehr verfügbar. Deine Einstellungen und dein Mod bleiben erhalten.', recompile: 'Neu kompilieren',
+  confRepairT: 'INSTALLATION REPARIEREN?', confRepairB: 'Das Spiel wird aus deinem Disc-Image neu kompiliert. Deine Einstellungen und dein Mod bleiben erhalten.',
+  confUninstT: 'SPIEL DEINSTALLIEREN?', confUninstB: 'Das neu kompilierte Spiel wird aus {a} gelöscht, mit deinem Mod und deinen Einstellungen. Dein Disc-Image wird nicht verändert.',
+  uninstalled: 'Spiel deinstalliert', uninstalledX: 'Dein Disc-Image wurde nicht verändert.',
+  wFolder: 'Ordner', wVersion: 'Version', wDisc: 'Disc-Image', wInstall: 'Installation',
+  whereH: 'WO SOLL DAS SPIEL HIN?', whereP: 'Das Spiel wird aus deiner eigenen Disc neu aufgebaut. Es wird keine Spieldatei heruntergeladen.',
+  installDir: 'Installationsordner', freeOn: '{a} frei auf {b}', required: 'Benötigter Platz: etwa {a}',
+  pickH: 'WÄHLE EINE VERSION', pickP: 'Du kannst sie später auf der Seite Installation ändern.', recommended: 'EMPFOHLEN',
+  clangT: 'Clang, alles inklusive', clang1: 'Nichts zu installieren', clang2: 'Etwa {a} Download', clang3: 'Kein DLSS',
+  msvc1: 'Erfordert Visual Studio 2022 (C++)', msvc2: 'DLSS / DLAA für NVIDIA-RTX-Karten', msvc3: 'Etwa {a} Download',
+  vsFound: '{a} gefunden', vsMissing: 'Visual Studio 2022 mit C++ ist nicht installiert.',
+  vsMissingT: 'Visual Studio nicht gefunden', vsMissingX: 'Installiere Visual Studio 2022 mit C++ oder wähle die Clang-Version.',
+  discH: 'DISC-IMAGE', discP: 'Wähle das .iso-Image deiner Xbox-Disc. Nur die US-Version wird unterstützt.',
+  analysing: 'Image wird geprüft…', dropIso: 'Lege hier eine .iso-Datei ab', orClick: ' oder klicke zum Durchsuchen',
+  isoValidD: 'Gültiges Image. US-Version (NTSC-U) geprüft.', isoEuropeT: 'Europäische Version erkannt', isoEuropeD: 'Nur die US-Version wird unterstützt. Wähle ein anderes Image.',
+  isoOtherT: 'Nicht unterstützte Version', isoOtherD: 'Das ist nicht die US-Version von Def Jam: Fight for NY. Wähle ein anderes Image.',
+  isoBadT: 'Datei nicht lesbar', isoBadD: 'Die Datei ist unvollständig, beschädigt oder kein Xbox-Disc-Image.',
+  needIsoT: 'Disc-Image nicht gefunden', needIsoX: 'Es wurde verschoben oder gelöscht. Wähle es erneut aus.',
+  s0: 'Download', s1: 'Disc-Prüfung', s2: 'Entpacken', s3: 'Übersetzung nach C', s4: 'Kompilierung', s5: 'Abschluss',
+  stepOf: 'Schritt {a} von {b}', elapsed: 'Vergangen {a}', remaining: 'Noch etwa {a}',
+  readyH: 'DAS SPIEL IST BEREIT', readyP: 'Neu kompiliert in {a}', failH: 'DIE INSTALLATION IST FEHLGESCHLAGEN', failP: 'Die Installation brach bei Schritt {a} von 6 ab. Dein Disc-Image wurde nicht verändert.',
+  openLog: 'Protokoll öffnen', retry: 'Erneut versuchen', hideLog: 'Protokoll ausblenden', showLog: 'Protokoll anzeigen', lines: '{a} Zeilen',
+  back: 'Zurück', next: 'Weiter', startInstall: 'Installation starten',
+  confCancelT: 'INSTALLATION ABBRECHEN?', confCancelB: 'Der Fortschritt geht verloren und die temporären Dateien werden gelöscht. Dein Disc-Image wird nicht verändert.',
+  cancelInstall: 'Installation abbrechen', continue: 'Fortfahren',
+  cancelled: 'Installation abgebrochen', cancelledX: 'Die heruntergeladenen Dateien wurden gelöscht.',
+  aboutP: 'Inoffizielle PC-Portierung von Fans. Dieses Projekt ist weder mit Electronic Arts noch mit Def Jam Recordings oder AKI Corporation verbunden. Es wird keine Spieldatei verteilt: Das Spiel wird aus deinem eigenen Disc-Image neu aufgebaut.',
+  licences: 'LIZENZEN', source: 'Quellcode', licTexts: 'Vollständige Lizenztexte',
+  licPort: 'Diese Portierung (Launcher und Runtime)', licSdk: 'Microsoft-SDK-Lizenz', licNvidia: 'NVIDIA-Lizenz',
+  notMod: 'Diese Datei ist kein Mod', notModX: 'Eine .mod-Datei ist ein ZIP-Archiv mit einer mod.ini im Stammverzeichnis.',
+  modIncomplete: 'Mod-Installation unvollständig', modIncompleteX: 'Das Entpacken ist fehlgeschlagen (Code {a}).',
+  modInstalled: 'Mod installiert', modInstalledX: '{a} wird beim nächsten Spielstart geladen.',
+  notInstalled: 'Das Spiel ist nicht installiert', notInstalledX: 'Installiere es über die Seite Installation.',
+  launchRefused: 'Das Spiel konnte nicht starten', launchRefusedX: 'Windows hat den Start von defjam_recomp.exe verweigert (Fehler {a}).',
+  launchFailed: 'Das Spiel konnte nicht starten', launchFailedX: 'defjam_recomp.exe wurde mit Code {a} beendet. Sieh im Protokoll nach.',
+  settingsNotSaved: 'Einstellungen nicht gespeichert', settingsNotSavedX: 'defjam.ini konnte nicht geschrieben werden.',
+  modRemoved: 'Mod entfernt', modRemovedX: 'Die ersetzten Dateien wurden wiederhergestellt.',
+  noLog: 'Noch kein Protokoll', noLogX: 'Das Spielprotokoll wird während einer Partie geschrieben.',
+  uninstallIncomplete: 'Deinstallation unvollständig', uninstallIncompleteX: 'Einige Dateien werden noch verwendet. Schließe das Spiel und versuche es erneut.',
+  launcherUpdateFailed: 'Launcher konnte nicht aktualisiert werden', launcherUpdateFailedX: 'Der Download ist fehlgeschlagen ({a}). Versuche es später erneut.',
+  e_noDir: 'kein Installationsordner', e_localCopy: 'lokales Paket konnte nicht kopiert werden', e_download: 'Download fehlgeschlagen: {a}',
+  e_badPackage: 'das heruntergeladene Paket ist nicht lesbar', e_placeFailed: 'Dateien konnten nicht abgelegt werden ({a})',
+  e_installerStopped: 'der Installer wurde beendet (Code {a})', e_installer: '{a}',
+  GB: 'GB', MB: 'MB', TB: 'TB'
+},
+pt: {
+  play: 'Jogar', settings: 'Configurações', mods: 'Mods', install: 'Instalação', log: 'Registro', about: 'Sobre',
+  tagline: 'XBOX · 2004 · PORT PARA PC NÃO OFICIAL', playBig: 'JOGAR', running: 'EM EXECUÇÃO',
+  modsOff: 'Mods desativados', modOn: 'Mod: {a}', noModShort: 'Nenhum mod',
+  updGame: 'Atualização disponível: {a}', updGameNote: 'Apenas os arquivos alterados são baixados e recompilados. Suas configurações e seu mod são mantidos.',
+  updLauncher: 'Nova versão do launcher: {a}', updLauncherNote: 'O launcher se atualiza e reinicia em poucos segundos.',
+  update: 'Atualizar', later: 'Mais tarde',
+  confUpdT: 'ATUALIZAR?', confUpdB: 'A versão {a} será instalada. Apenas os arquivos alterados são recompilados; a imagem de disco não é necessária. Suas configurações e seu mod são mantidos.',
+  launcherUpdating: 'Atualizando o launcher', launcherUpdatingX: 'Ele vai reiniciar em instantes.',
+  settingsH: 'CONFIGURAÇÕES', settingsSub: 'Aplicadas na próxima vez que o jogo iniciar.',
+  secImage: 'IMAGEM', secTextures: 'TEXTURAS', secGame: 'JOGO', secLauncher: 'LAUNCHER',
+  res: 'Resolução interna', resD: 'Renderização interna do jogo, múltiplo da resolução original do Xbox.',
+  aspect: 'Proporção', aspectD: '4:3 respeita o jogo original. 16:9 amplia o campo de visão.',
+  cine: 'Cenas em altura total', cineD: 'Recorta as cenas para preencher uma tela 16:9.',
+  menus43: 'Manter os menus em 4:3', menus43D: 'Mantém os menus e a interface no formato original, sem esticar.',
+  only169: 'Disponível apenas em 16:9.',
+  dlssD: 'O DLAA melhora o antisserrilhamento nas placas NVIDIA RTX.', dlssNo: 'Indisponível nesta versão. Instale a versão MSVC + DLSS em Instalação.',
+  full: 'Tela cheia ao iniciar', fullD: 'F11 alterna entre janela e tela cheia no jogo.',
+  bil: 'Filtragem bilinear', bilD: 'Suaviza as texturas ampliadas.',
+  mips: 'Mipmaps + anisotrópico 16×', mipsD: 'Texturas nítidas à distância, sem cintilação.',
+  fx: 'Efeitos de renderização', fxD: 'Reflexos no chão e iluminação dos locais.',
+  hd: 'Pacote de texturas HD', hdD: 'Substitui as texturas originais pelas da pasta escolhida.',
+  hdDir: 'Pasta do pacote HD', hdDirD: 'As imagens são nomeadas pela sua impressão digital (veja o README).', noFolder: 'Nenhuma pasta escolhida', browse: 'Procurar…',
+  modOnT: 'Mod ativado', modOnD: 'Carrega o mod instalado ao iniciar o jogo.',
+  unlock: 'Desbloquear tudo', unlockD: 'Lutadores, locais e 10.000 pontos desde o início.',
+  pad: 'Layout original do controle do Xbox', padD: 'LT/RT para os gatilhos, LB/RB para os botões preto e branco.',
+  lang: 'Idioma', langD: 'Idioma do launcher.', langAuto: 'Automático (Windows)',
+  unsaved: 'Alterações não salvas', cancel: 'Cancelar', allSaved: 'Todas as configurações estão salvas.', save: 'Salvar', saveAndPlay: 'Salvar e jogar',
+  saved: 'Configurações salvas', savedX: 'Elas serão aplicadas na próxima vez que o jogo iniciar.',
+  modsSub: 'Um mod ativo por vez: instalar um novo substitui o anterior.', modsSubOff: ' Mods desativados em Configurações.',
+  modsFolder: 'Abrir a pasta de mods', installModBtn: 'Instalar um arquivo .mod',
+  dropBusy: 'Instalando…', dropReplace: 'Solte para substituir «{a}»', dropInstall: 'Solte para instalar',
+  dropHintReplace: 'Solte aqui um arquivo .mod para substituir o mod atual', dropHint: 'Solte aqui um arquivo .mod para instalá-lo',
+  noModH: 'NENHUM MOD INSTALADO', noModP: 'Os mods substituem lutadores, texturas, sons ou modelos do jogo. Solte aqui um arquivo .mod ou escolha-o no seu computador.',
+  chooseMod: 'Escolher um arquivo .mod', files: '{a} arquivos', remove: 'Remover', installing: 'Instalando…', newMod: 'Novo mod',
+  busyT: 'Instalação já em andamento', busyX: 'Aguarde o fim da instalação.',
+  replaceT: 'SUBSTITUIR «{a}»?', replaceB: 'Apenas um mod pode estar ativo. «{a}» será removido e substituído pelo novo mod.', replace: 'Substituir',
+  removeT: 'REMOVER «{a}»?', removeB: 'Os {a} arquivos deste mod serão apagados da pasta de mods, e o que ele substituiu será restaurado. Você poderá reinstalá-lo depois a partir do arquivo .mod.',
+  oneFile: 'Um arquivo por vez', oneFileX: 'Apenas «{a}» será usado.',
+  installH: 'INSTALAÇÃO', current: 'INSTALAÇÃO ATUAL', folder: 'Pasta', open: 'Abrir', version: 'Versão', builtOn: 'compilada em {a}',
+  disc: 'Imagem de disco', verified: 'verificada', actions: 'AÇÕES',
+  switchT: 'Mudar de versão', switchToClang: 'Mudar para Clang, tudo incluído: nada a instalar, mas sem DLSS. O jogo será recompilado.',
+  switchToMsvc: 'Mudar para MSVC + DLSS. Requer o Visual Studio 2022 com C++. O jogo será recompilado.', switchTo: 'Mudar para {a}',
+  repairT: 'Reparar / reinstalar', repairD: 'Recompila o jogo a partir da sua imagem de disco. Suas configurações e seu mod são mantidos.', repair: 'Reparar',
+  uninstT: 'Desinstalar', uninstD: 'Apaga o jogo recompilado e seus arquivos. Sua imagem de disco não é alterada.',
+  confSwitchT: 'MUDAR PARA {a}?', confSwitchMsvc: 'O jogo será recompilado com o Visual Studio. Suas configurações e seu mod são mantidos.',
+  confSwitchClang: 'O jogo será recompilado com o Clang. O DLSS não estará mais disponível. Suas configurações e seu mod são mantidos.', recompile: 'Recompilar',
+  confRepairT: 'REPARAR A INSTALAÇÃO?', confRepairB: 'O jogo será recompilado a partir da sua imagem de disco. Suas configurações e seu mod são mantidos.',
+  confUninstT: 'DESINSTALAR O JOGO?', confUninstB: 'O jogo recompilado será apagado de {a}, com seu mod e suas configurações. Sua imagem de disco não é alterada.',
+  uninstalled: 'Jogo desinstalado', uninstalledX: 'Sua imagem de disco não foi alterada.',
+  wFolder: 'Pasta', wVersion: 'Versão', wDisc: 'Imagem de disco', wInstall: 'Instalação',
+  whereH: 'ONDE INSTALAR O JOGO?', whereP: 'O jogo é reconstruído a partir do seu próprio disco. Nenhum arquivo do jogo é baixado.',
+  installDir: 'Pasta de instalação', freeOn: '{a} livres em {b}', required: 'Espaço necessário: cerca de {a}',
+  pickH: 'ESCOLHA UMA VERSÃO', pickP: 'Você poderá mudar depois na página Instalação.', recommended: 'RECOMENDADO',
+  clangT: 'Clang, tudo incluído', clang1: 'Nada a instalar', clang2: 'Download de cerca de {a}', clang3: 'Sem DLSS',
+  msvc1: 'Requer o Visual Studio 2022 (C++)', msvc2: 'DLSS / DLAA para placas NVIDIA RTX', msvc3: 'Download de cerca de {a}',
+  vsFound: '{a} detectado', vsMissing: 'O Visual Studio 2022 com C++ não está instalado.',
+  vsMissingT: 'Visual Studio não encontrado', vsMissingX: 'Instale o Visual Studio 2022 com C++ ou escolha a versão Clang.',
+  discH: 'IMAGEM DE DISCO', discP: 'Selecione a imagem .iso do seu disco do Xbox. Apenas a versão USA é compatível.',
+  analysing: 'Verificando a imagem…', dropIso: 'Solte aqui um arquivo .iso', orClick: ' ou clique para procurar',
+  isoValidD: 'Imagem válida. Versão USA (NTSC-U) verificada.', isoEuropeT: 'Versão europeia detectada', isoEuropeD: 'Apenas a versão USA é compatível. Escolha outra imagem.',
+  isoOtherT: 'Versão não compatível', isoOtherD: 'Esta não é a versão USA de Def Jam: Fight for NY. Escolha outra imagem.',
+  isoBadT: 'Arquivo ilegível', isoBadD: 'O arquivo está incompleto, danificado ou não é uma imagem de disco do Xbox.',
+  needIsoT: 'Imagem de disco não encontrada', needIsoX: 'Ela foi movida ou apagada. Escolha-a novamente.',
+  s0: 'Download', s1: 'Verificação do disco', s2: 'Extração', s3: 'Tradução para C', s4: 'Compilação', s5: 'Finalização',
+  stepOf: 'Etapa {a} de {b}', elapsed: 'Tempo decorrido {a}', remaining: 'Faltam cerca de {a}',
+  readyH: 'O JOGO ESTÁ PRONTO', readyP: 'Recompilado em {a}', failH: 'A INSTALAÇÃO FALHOU', failP: 'A instalação parou na etapa {a} de 6. Sua imagem de disco não foi alterada.',
+  openLog: 'Abrir o registro', retry: 'Tentar novamente', hideLog: 'Ocultar o registro', showLog: 'Mostrar o registro', lines: '{a} linhas',
+  back: 'Voltar', next: 'Avançar', startInstall: 'Iniciar a instalação',
+  confCancelT: 'CANCELAR A INSTALAÇÃO?', confCancelB: 'O progresso será perdido e os arquivos temporários apagados. Sua imagem de disco não é alterada.',
+  cancelInstall: 'Cancelar a instalação', continue: 'Continuar',
+  cancelled: 'Instalação cancelada', cancelledX: 'Os arquivos baixados foram apagados.',
+  aboutP: 'Port para PC não oficial, feito por fãs. Este projeto não é afiliado à Electronic Arts, nem à Def Jam Recordings, nem à AKI Corporation. Nenhum arquivo do jogo é distribuído: o jogo é reconstruído a partir da sua própria imagem de disco.',
+  licences: 'LICENÇAS', source: 'Código-fonte', licTexts: 'Textos completos das licenças',
+  licPort: 'Este port (launcher e runtime)', licSdk: 'Licença do SDK da Microsoft', licNvidia: 'Licença da NVIDIA',
+  notMod: 'Este arquivo não é um mod', notModX: 'Um arquivo .mod é um zip com um mod.ini na raiz.',
+  modIncomplete: 'Instalação do mod incompleta', modIncompleteX: 'A extração falhou (código {a}).',
+  modInstalled: 'Mod instalado', modInstalledX: '{a} será carregado na próxima vez que o jogo iniciar.',
+  notInstalled: 'O jogo não está instalado', notInstalledX: 'Instale-o na página Instalação.',
+  launchRefused: 'O jogo não pôde iniciar', launchRefusedX: 'O Windows recusou iniciar o defjam_recomp.exe (erro {a}).',
+  launchFailed: 'O jogo não pôde iniciar', launchFailedX: 'O defjam_recomp.exe fechou com o código {a}. Consulte o registro.',
+  settingsNotSaved: 'Configurações não salvas', settingsNotSavedX: 'Não foi possível gravar o defjam.ini.',
+  modRemoved: 'Mod removido', modRemovedX: 'Os arquivos que ele substituía foram restaurados.',
+  noLog: 'Ainda não há registro', noLogX: 'O registro do jogo é gravado durante uma partida.',
+  uninstallIncomplete: 'Desinstalação incompleta', uninstallIncompleteX: 'Alguns arquivos ainda estão em uso. Feche o jogo e tente novamente.',
+  launcherUpdateFailed: 'Não foi possível atualizar o launcher', launcherUpdateFailedX: 'O download falhou ({a}). Tente novamente mais tarde.',
+  e_noDir: 'nenhuma pasta de instalação', e_localCopy: 'não foi possível copiar o pacote local', e_download: 'falha no download: {a}',
+  e_badPackage: 'o pacote baixado está ilegível', e_placeFailed: 'não foi possível colocar os arquivos ({a})',
+  e_installerStopped: 'o instalador parou (código {a})', e_installer: '{a}',
+  GB: 'GB', MB: 'MB', TB: 'TB'
+}};
+let LANG = 'en';
+function t(k, a, b) {
+  let s = (TX[LANG] && TX[LANG][k]) || TX.en[k] || TX.fr[k] || k;
+  if (a !== undefined) s = s.split('{a}').join(a);
+  if (b !== undefined) s = s.split('{b}').join(b);
+  return s;
+}
+const LOCALE = () => ({ fr: 'fr-FR', en: 'en-US', es: 'es-ES', de: 'de-DE', pt: 'pt-BR' }[LANG] || 'en-US');
+function taille(o) {
+  o = +o || 0;
+  const [v, u] = o >= 1e12 ? [o / 1e12, 'TB'] : o >= 1e9 ? [o / 1e9, 'GB'] : [o / 1e6, 'MB'];
+  return new Intl.NumberFormat(LOCALE(), { maximumFractionDigits: u === 'MB' ? 0 : 2 }).format(v) + ' ' + t(u);
+}
+
 const S = {
   ready: false, installed: false, screen: 'wizard', wizStep: 0,
-  installDir: 'C:\\Jeux\\DefJam-FFNY', freeSpace: '', diskUsed: '50%', required: 'environ 4,5 Go',
+  installDir: 'C:\\Jeux\\DefJam-FFNY', free: 0, drive: '', diskUsed: '50%',
   build: 'clang', vs: '', dlssBuilt: false, iso: null, isoChecking: false, isoDrag: false,
   prog: null, logOpen: false,
   settings: { ...DEFAULTS }, saved: { ...DEFAULTS },
   mod: null, modBusy: null, modDrag: false,
   gameRunning: false, update: null, updateDismissed: false,
-  modal: null, about: false, toasts: [], version: '1.0', gameVersion: '', builtOn: '', gameSize: '', isoName: '',
-  hero: '', licences: []
+  modal: null, about: false, toasts: [], version: '', gameVersion: '', builtOn: '', gameBytes: 0, isoName: '',
+  lang: 'en', langPref: 'auto', apresMaj: false
 };
 
 // ---------- l'hote ----------
@@ -108,38 +583,47 @@ function onHost(m) {
     case 'state': {
       const st = m.state || {};
       const patch = { ...st, ready: true };
-      if (st.free != null) { patch.freeSpace = st.free; patch.diskUsed = st.used; }
+      if (st.used) patch.diskUsed = st.used;
       if (st.settings) { patch.settings = { ...DEFAULTS, ...st.settings }; patch.saved = { ...DEFAULTS, ...st.settings }; }
       if (!S.ready) patch.screen = st.installed ? 'home' : 'wizard';
+      if (st.lang && TX[st.lang]) LANG = st.lang;
+      document.documentElement.lang = LANG;
       return set(patch);
     }
-    case 'folderPicked': return set({ installDir: m.path, freeSpace: m.free, diskUsed: m.used || '50%' });
-    case 'isoChecked': return set({ isoChecking: false, iso: m.status ? { status: m.status, file: m.file, size: m.size } : null });
+    case 'folderPicked': return set({ installDir: m.path, free: m.free, drive: m.drive, diskUsed: m.used || '50%' });
+    case 'isoChecked': return set({ isoChecking: false, iso: m.status ? { status: m.status, file: m.file, bytes: m.bytes } : null });
+    case 'needIso': set({ screen: 'wizard', wizStep: 2, prog: null, iso: null, isoChecking: false }); return toast('error', t('needIsoT'), t('needIsoX'));
     case 'installProgress': return set(s => {
       const log = s.prog ? s.prog.log : [];
       if (m.line) log.push({ time: mmss(m.elapsed), text: m.line, level: m.level || 'info' });
       return { prog: { ...s.prog, step: m.step, stepPct: m.stepPct, pct: m.pct, elapsed: m.elapsed, log, result: null } };
     });
-    case 'installDone': return set(s => ({ prog: { ...s.prog, result: m.ok ? 'ok' : 'fail', error: m.error, failStep: m.step, pct: m.ok ? 1 : s.prog.pct },
-      installed: m.ok ? true : s.installed, logOpen: !m.ok, gameSize: m.size || s.gameSize, build: m.build || s.build, dlssBuilt: m.dlssBuilt != null ? m.dlssBuilt : s.dlssBuilt, update: m.ok ? null : s.update }));
-    case 'installCancelled': set({ prog: null, wizStep: S.installed ? 0 : 2, screen: S.installed ? 'install' : 'wizard' }); return toast('info', 'Installation annulée', 'Les fichiers téléchargés ont été supprimés.');
+    case 'installDone': return set(s => ({ prog: { ...s.prog, result: m.ok ? 'ok' : 'fail', errKey: m.errKey, errArg: m.errArg, failStep: m.step, pct: m.ok ? 1 : s.prog.pct },
+      installed: m.ok ? true : s.installed, logOpen: !m.ok, gameBytes: m.bytes || s.gameBytes, build: m.build || s.build,
+      dlssBuilt: m.dlssBuilt != null ? m.dlssBuilt : s.dlssBuilt, update: m.ok ? null : s.update }));
+    case 'installCancelled': set({ prog: null, wizStep: S.installed ? 0 : 2, screen: S.installed ? 'install' : 'wizard' }); return toast('info', t('cancelled'), t('cancelledX'));
     case 'gameStarted': return set({ gameRunning: true });
     case 'gameExited': return set({ gameRunning: false });
     case 'settingsSaved': return set(s => ({ saved: { ...s.settings } }));
     case 'mod': return set({ mod: m.mod || null, modBusy: null });
     case 'modProgress': return set({ modBusy: { name: m.name, pct: m.pct } });
     case 'hdPicked': return set(s => ({ settings: { ...s.settings, hdPath: m.path, hdPack: true } }));
-    case 'update': return set({ update: m.version ? { version: m.version, notes: m.notes } : null });
-    case 'uninstalled': set({ installed: false, screen: 'wizard', wizStep: 0, prog: null, iso: null, mod: null }); return toast('info', 'Jeu désinstallé', "Votre image disque n'a pas été modifiée.");
-    case 'error': return toast('error', m.title, m.text);
-    case 'info': return toast('info', m.title, m.text);
+    case 'update': {
+      set({ update: m.version ? { kind: m.kind || 'jeu', version: m.version } : null, updateDismissed: false });
+      /* relance apres la mise a jour du lanceur : le jeu suit sans redemander */
+      if (m.kind === 'jeu' && S.apresMaj && S.installed) { S.apresMaj = false; startInstall('update'); }
+      return;
+    }
+    case 'uninstalled': set({ installed: false, screen: 'wizard', wizStep: 0, prog: null, iso: null, mod: null }); return toast('info', t('uninstalled'), t('uninstalledX'));
+    case 'error': case 'info':
+      return m.key ? toast(m.type, t(m.key), t(m.key + 'X', m.arg)) : toast(m.type, m.title, m.text);
   }
 }
 
 function toast(kind, title, text) {
   const id = Math.random();
   set(s => ({ toasts: [...s.toasts, { id, kind, title, text }].slice(-3) }));
-  setTimeout(() => set(s => ({ toasts: s.toasts.filter(t => t.id !== id) })), kind === 'error' ? 6000 : 3500);
+  setTimeout(() => set(s => ({ toasts: s.toasts.filter(x => x.id !== id) })), kind === 'error' ? 6000 : 3500);
 }
 
 // ---------- actions ----------
@@ -161,35 +645,45 @@ function launch() {
 }
 function confirmBox(o) { set({ modal: o }); }
 function installMod(objets) {
-  if (S.modBusy) return toast('error', 'Installation déjà en cours', "Patientez jusqu'à la fin de l'installation.");
-  const go = () => send({ type: 'installMod' }, objets);
-  if (!S.mod) return go();
-  confirmBox({ title: `REMPLACER « ${S.mod.name.toUpperCase()} » ?`, body: `Un seul mod peut être actif. « ${S.mod.name} » sera retiré et remplacé par le nouveau mod.`, confirm: 'Remplacer', action: go });
+  if (S.modBusy) return toast('error', t('busyT'), t('busyX'));
+  const doIt = () => send({ type: 'installMod' }, objets);
+  if (!S.mod) return doIt();
+  confirmBox({ title: t('replaceT', S.mod.name.toUpperCase()), body: t('replaceB', S.mod.name), confirm: t('replace'), action: doIt });
 }
 const setS = (k, v) => set(s => ({ settings: { ...s.settings, [k]: v } }));
+function setLang(v) {
+  LANG = v === 'auto' ? (S.langWindows || S.lang) : v;
+  if (!TX[LANG]) LANG = 'en';
+  document.documentElement.lang = LANG;
+  send({ type: 'setLang', lang: v });
+  set({ langPref: v });
+}
 
 const A = {
   home: () => go('home'), settings: () => go('settings'), mods: () => go('mods'), install: () => go('install'),
   log: () => send({ type: 'openLog' }), about: () => set({ about: true }), closeAbout: () => set({ about: false }),
-  update: () => confirmBox({ title: 'METTRE À JOUR ?', body: `La version ${S.update.version} sera téléchargée et le jeu recompilé depuis votre image disque. Vos réglages et votre mod sont conservés.`, confirm: 'Mettre à jour', action: () => startInstall('update') }),
+  update: () => {
+    if (S.update.kind === 'lanceur') { toast('info', t('launcherUpdating'), t('launcherUpdatingX')); return send({ type: 'updateLauncher' }); }
+    confirmBox({ title: t('confUpdT'), body: t('confUpdB', S.update.version), confirm: t('update'), action: () => startInstall('update') });
+  },
   dismissUpdate: () => set({ updateDismissed: true }),
   launch, revert: () => set(s => ({ settings: { ...s.saved } })),
-  save: () => { if (!dirty()) return; send({ type: 'saveSettings', settings: S.settings }); toast('info', 'Réglages enregistrés', 'Ils seront appliqués au prochain lancement.'); },
+  save: () => { if (!dirty()) return; send({ type: 'saveSettings', settings: S.settings }); toast('info', t('saved'), t('savedX')); },
   saveAndPlay: () => { send({ type: 'saveSettings', settings: S.settings }); set(s => ({ saved: { ...s.settings }, screen: 'home' })); setTimeout(launch, 50); },
   browseHd: () => send({ type: 'browseHdPack' }),
   installMod: () => installMod(),
   modsFolder: () => send({ type: 'openFolder', what: 'mods' }),
-  removeMod: () => confirmBox({ title: `RETIRER « ${S.mod.name.toUpperCase()} » ?`, body: `Les ${S.mod.files} fichiers de ce mod seront supprimés du dossier des mods, et ce qu'il avait remplacé sera remis. Vous pourrez le réinstaller plus tard depuis son fichier .mod.`, confirm: 'Retirer', danger: true, action: () => send({ type: 'removeMod' }) }),
+  removeMod: () => confirmBox({ title: t('removeT', S.mod.name.toUpperCase()), body: t('removeB', S.mod.files), confirm: t('remove'), danger: true, action: () => send({ type: 'removeMod' }) }),
   gameFolder: () => send({ type: 'openFolder', what: 'game' }),
-  askSwitch: () => { const to = S.build === 'msvc' ? 'clang' : 'msvc'; confirmBox({ title: `PASSER À ${to === 'msvc' ? 'MSVC + DLSS' : 'CLANG'} ?`, body: to === 'msvc' ? 'Le jeu sera recompilé avec Visual Studio. Vos réglages et votre mod sont conservés.' : 'Le jeu sera recompilé avec Clang. Le DLSS ne sera plus disponible. Vos réglages et votre mod sont conservés.', confirm: 'Recompiler', action: () => { set({ build: to }); startInstall('switch'); } }); },
-  askRepair: () => confirmBox({ title: "RÉPARER L'INSTALLATION ?", body: 'Le jeu sera recompilé depuis votre image disque. Vos réglages et votre mod sont conservés.', confirm: 'Réparer', action: () => startInstall('repair') }),
-  askUninstall: () => confirmBox({ title: 'DÉSINSTALLER LE JEU ?', body: `Le jeu recompilé sera supprimé de ${S.installDir}, avec votre mod et vos réglages. Votre image disque n'est pas modifiée.`, confirm: 'Désinstaller', danger: true, action: () => send({ type: 'uninstall' }) }),
+  askSwitch: () => { const to = S.build === 'msvc' ? 'clang' : 'msvc'; confirmBox({ title: t('confSwitchT', to === 'msvc' ? 'MSVC + DLSS' : 'CLANG'), body: to === 'msvc' ? t('confSwitchMsvc') : t('confSwitchClang'), confirm: t('recompile'), action: () => { set({ build: to }); startInstall('switch'); } }); },
+  askRepair: () => confirmBox({ title: t('confRepairT'), body: t('confRepairB'), confirm: t('repair'), action: () => startInstall('repair') }),
+  askUninstall: () => confirmBox({ title: t('confUninstT'), body: t('confUninstB', S.installDir), confirm: t('uninstT'), danger: true, action: () => send({ type: 'uninstall' }) }),
   browseDir: () => send({ type: 'browseFolder' }),
   pickClang: () => set({ build: 'clang' }), pickMsvc: () => set({ build: 'msvc' }),
   pickIso: () => { if (S.isoChecking) return; set({ isoChecking: true }); send({ type: 'pickIso' }); },
   back: () => set({ wizStep: Math.max(0, S.wizStep - 1) }),
-  next: () => { if (S.wizStep === 2 && !(S.iso && S.iso.status === 'valid')) return; if (S.wizStep === 1 && S.build === 'msvc' && !S.vs) return toast('error', 'Visual Studio introuvable', 'Installez Visual Studio 2022 avec le C++, ou choisissez la version Clang.'); if (S.wizStep === 2) startInstall('install'); else set({ wizStep: S.wizStep + 1 }); },
-  askCancel: () => confirmBox({ title: "ANNULER L'INSTALLATION ?", body: "La progression sera perdue et les fichiers temporaires supprimés. Votre image disque n'est pas modifiée.", confirm: "Annuler l'installation", cancel: 'Continuer', danger: true, action: () => send({ type: 'cancelInstall' }) }),
+  next: () => { if (S.wizStep === 2 && !(S.iso && S.iso.status === 'valid')) return; if (S.wizStep === 1 && S.build === 'msvc' && !S.vs) return toast('error', t('vsMissingT'), t('vsMissingX')); if (S.wizStep === 2) startInstall(S.installed ? 'repair' : 'install'); else set({ wizStep: S.wizStep + 1 }); },
+  askCancel: () => confirmBox({ title: t('confCancelT'), body: t('confCancelB'), confirm: t('cancelInstall'), cancel: t('continue'), danger: true, action: () => send({ type: 'cancelInstall' }) }),
   toggleLog: () => set({ logOpen: !S.logOpen }),
   finish: () => { set({ screen: 'home', wizStep: 0, prog: null }); setTimeout(launch, 50); },
   retry: () => startInstall('retry'),
@@ -197,7 +691,7 @@ const A = {
   confirmModal: () => { const a = S.modal && S.modal.action; set({ modal: null }); if (a) a(); },
   repo: () => send({ type: 'openUrl', url: 'https://github.com/comoria08/defjam_recomp' }),
   licences: () => send({ type: 'openFolder', what: 'licences' }),
-  closeToast: el => set(s => ({ toasts: s.toasts.filter(t => String(t.id) !== el.dataset.id) }))
+  closeToast: el => set(s => ({ toasts: s.toasts.filter(x => String(x.id) !== el.dataset.id) }))
 };
 
 // ---------- rendu ----------
@@ -207,11 +701,11 @@ const I = {
   folder: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v10H3z"/></svg>',
   check: (w, c, sw = 2.8) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,12.5 10,17.5 19,7"/></svg>`,
   cross: (w, sw = 2.4) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>`,
-  info: w => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.8" r="0.6" fill="currentColor"/></svg>`,
-  warn: (w, c) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3.5 22 20.5H2z"/><line x1="12" y1="10" x2="12" y2="14.5"/><circle cx="12" cy="17.3" r="0.6" fill="${c}"/></svg>`
+  info: w => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.8" r="0.6" fill="currentColor"/></svg>`
 };
 const spin = n => `<span class="spin" style="width:${n}px;height:${n}px"></span>`;
 const buildName = b => (b || S.build) === 'msvc' ? 'MSVC + DLSS' : 'Clang';
+const STEPS = () => [t('s0'), t('s1'), t('s2'), t('s3'), t('s4'), t('s5')];
 
 function sidebar() {
   const nav = (k, label, icon, extra = '') => {
@@ -222,15 +716,15 @@ function sidebar() {
   return `<aside class="side">
     <img src="https://djffny.local/logo.png" alt="FFNY Recompiled" style="width:188px;height:63px;object-fit:contain;margin-bottom:28px;" draggable="false">
     <nav style="display:flex;flex-direction:column;gap:2px;">
-      ${nav('home', 'Jouer', I.play())}
-      ${nav('settings', '', I.sliders(18, '#0b0b0b'), `<span style="flex:1;">Réglages</span>${dirty() ? '<span style="width:6px;height:6px;border-radius:3px;background:#eeeeee;"></span>' : ''}`)}
-      ${nav('mods', '', '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>', `<span style="flex:1;">Mods</span><span style="font-size:12px;color:#9a9a9a;font-weight:500;">${S.mod ? 1 : ''}</span>`)}
-      ${nav('install', 'Installation', '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="13" width="18" height="7" rx="1.5"/><line x1="12" y1="3" x2="12" y2="10"/><polyline points="8.5,7 12,10.5 15.5,7"/><circle cx="17" cy="16.5" r="0.6" fill="currentColor"/></svg>')}
+      ${nav('home', t('play'), I.play())}
+      ${nav('settings', '', I.sliders(18, '#0b0b0b'), `<span style="flex:1;">${t('settings')}</span>${dirty() ? '<span style="width:6px;height:6px;border-radius:3px;background:#eeeeee;"></span>' : ''}`)}
+      ${nav('mods', '', '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>', `<span style="flex:1;">${t('mods')}</span><span style="font-size:12px;color:#9a9a9a;font-weight:500;">${S.mod ? 1 : ''}</span>`)}
+      ${nav('install', t('install'), '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="13" width="18" height="7" rx="1.5"/><line x1="12" y1="3" x2="12" y2="10"/><polyline points="8.5,7 12,10.5 15.5,7"/><circle cx="17" cy="16.5" r="0.6" fill="currentColor"/></svg>')}
     </nav>
     <div style="flex:1;"></div>
     <div style="display:flex;flex-direction:column;gap:2px;border-top:1px solid #1a1a1a;padding-top:12px;">
-      <button class="sub" data-act="log"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="3" width="14" height="18" rx="1.5"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>Journal</button>
-      <button class="sub" data-act="about">${I.info(16)}À propos</button>
+      <button class="sub" data-act="log"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="3" width="14" height="18" rx="1.5"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>${t('log')}</button>
+      <button class="sub" data-act="about">${I.info(16)}${t('about')}</button>
       <div class="mono" style="padding:10px 12px 0;font-size:11px;color:#5e5e5e;">Launcher v${esc(S.version)}</div>
     </div>
   </aside>`;
@@ -242,141 +736,145 @@ function heroBg(image) {
 
 function home() {
   const sv = S.saved, [rw, rh] = RES[sv.res];
-  const items = [buildName(), `${rw} × ${rh} (×${sv.res + 1})`, sv.aspect, !sv.mods ? 'Mods désactivés' : (S.mod ? `Mod : ${S.mod.name}` : 'Aucun mod')];
-  const upd = S.update && !S.updateDismissed ? `
+  const items = [buildName(), `${rw} × ${rh} (×${sv.res + 1})`, sv.aspect, !sv.mods ? t('modsOff') : (S.mod ? t('modOn', S.mod.name) : t('noModShort'))];
+  const u = S.update, lanc = u && u.kind === 'lanceur';
+  const upd = u && !S.updateDismissed ? `
     <div style="position:absolute;top:20px;left:28px;right:28px;display:flex;align-items:center;gap:14px;padding:12px 12px 12px 16px;background:rgba(20,20,20,.88);backdrop-filter:blur(10px);border:1px solid #2a2a2a;border-radius:8px;animation:ffin .3s ease;">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#eeeeee" stroke-width="2" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="15"/><polyline points="7.5,10.5 12,15 16.5,10.5"/><line x1="5" y1="20" x2="19" y2="20"/></svg>
-      <div style="flex:1;min-width:0;"><div style="font-weight:600;">Mise à jour disponible : ${esc(S.update.version)}</div>
-        <div style="color:#9a9a9a;font-size:12.5px;margin-top:2px;">${esc(S.update.notes || 'Le jeu sera recompilé depuis votre image disque.')}</div></div>
-      <button class="btn light" style="height:32px;padding:0 14px;font-size:13px;border-radius:5px;" data-act="update">Mettre à jour</button>
-      <button class="icobtn" style="width:32px;height:32px;" title="Plus tard" data-act="dismissUpdate">${I.cross(14)}</button>
+      <div style="flex:1;min-width:0;"><div style="font-weight:600;">${esc(lanc ? t('updLauncher', u.version) : t('updGame', u.version))}</div>
+        <div style="color:#9a9a9a;font-size:12.5px;margin-top:2px;">${esc(lanc ? t('updLauncherNote') : t('updGameNote'))}</div></div>
+      <button class="btn light" style="height:32px;padding:0 14px;font-size:13px;border-radius:5px;" data-act="update">${t('update')}</button>
+      <button class="icobtn" style="width:32px;height:32px;" title="${esc(t('later'))}" data-act="dismissUpdate">${I.cross(14)}</button>
     </div>` : '';
   return `<div class="abs">${heroBg('accueil.jpg')}
     <div class="abs" style="background:linear-gradient(to top,rgba(11,11,11,.96) 0%,rgba(11,11,11,.55) 38%,rgba(11,11,11,0) 70%),linear-gradient(to right,rgba(11,11,11,.9) 0%,rgba(11,11,11,.35) 45%,rgba(11,11,11,0) 75%);pointer-events:none;"></div>
     ${upd}
     <div style="position:absolute;left:48px;bottom:44px;right:48px;animation:ffin .35s ease;">
-      <div style="font-size:11px;letter-spacing:.28em;color:#9a9a9a;font-weight:600;margin-bottom:14px;">XBOX · 2004 · PORT PC NON OFFICIEL</div>
+      <div style="font-size:11px;letter-spacing:.28em;color:#9a9a9a;font-weight:600;margin-bottom:14px;">${t('tagline')}</div>
       <div class="cond" style="line-height:.88;"><div style="font-size:40px;letter-spacing:.16em;color:#d8d8d8;">DEF JAM</div><div style="font-size:104px;letter-spacing:-.005em;margin-top:6px;">FIGHT FOR NY</div></div>
       <div style="font-size:13px;letter-spacing:.5em;color:#9a9a9a;font-weight:600;margin:14px 0 30px 2px;">RECOMPILED</div>
       <div style="display:flex;align-items:center;gap:10px;">
-        <button class="play cond" data-act="launch" style="opacity:${S.gameRunning ? .75 : 1};">${S.gameRunning ? spin(18) : I.play(20)}${S.gameRunning ? 'EN COURS' : 'JOUER'}</button>
-        <button data-act="settings" title="Réglages" style="width:60px;height:60px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.12);border-radius:6px;background:rgba(27,27,27,.75);backdrop-filter:blur(8px);color:#eeeeee;cursor:pointer;">${I.sliders(22, '#1b1b1b')}</button>
+        <button class="play cond" data-act="launch" style="opacity:${S.gameRunning ? .75 : 1};">${S.gameRunning ? spin(18) : I.play(20)}${S.gameRunning ? t('running') : t('playBig')}</button>
+        <button data-act="settings" title="${esc(t('settings'))}" style="width:60px;height:60px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.12);border-radius:6px;background:rgba(27,27,27,.75);backdrop-filter:blur(8px);color:#eeeeee;cursor:pointer;">${I.sliders(22, '#1b1b1b')}</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:18px;color:#9a9a9a;font-size:13px;">
-        ${items.map((t, i) => `<span style="display:flex;align-items:center;gap:10px;"><span style="color:#d0d0d0;">${esc(t)}</span>${i < items.length - 1 ? '<span style="width:3px;height:3px;border-radius:2px;background:#5a5a5a;"></span>' : ''}</span>`).join('')}
+        ${items.map((x, i) => `<span style="display:flex;align-items:center;gap:10px;"><span style="color:#d0d0d0;">${esc(x)}</span>${i < items.length - 1 ? '<span style="width:3px;height:3px;border-radius:2px;background:#5a5a5a;"></span>' : ''}</span>`).join('')}
       </div>
     </div></div>`;
 }
 
 function settings() {
   const st = S.settings, is169 = st.aspect === '16:9';
-  const no169 = { disabled: !is169, reason: 'Disponible en 16:9 uniquement.' };
+  const no169 = { disabled: !is169, reason: t('only169') };
   const row = (o, control) => `<div class="row" style="opacity:${o.disabled ? .42 : 1};"><div style="min-width:0;"><div class="lbl">${o.label}</div><div class="desc">${o.desc}</div>
       ${o.disabled && o.reason ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:#c9c9c9;">${I.info(13)}${o.reason}</div>` : ''}</div>
       <div style="display:flex;align-items:center;gap:8px;pointer-events:${o.disabled ? 'none' : 'auto'};">${control}</div></div>`;
   const tg = (key, label, desc, extra = {}) => {
     const on = !!st[key] && !extra.disabled;
-    return row({ label, desc, ...extra }, `<button class="sw" role="switch" data-toggle="${key}" style="background:${on ? '#eeeeee' : '#333333'};"><span style="left:${on ? '21px' : '3px'};background:${on ? '#141414' : '#9a9a9a'};"></span></button>`);
+    return row({ label: t(label), desc: t(desc), ...extra }, `<button class="sw" role="switch" data-toggle="${key}" style="background:${on ? '#eeeeee' : '#333333'};"><span style="left:${on ? '21px' : '3px'};background:${on ? '#141414' : '#9a9a9a'};"></span></button>`);
   };
   const seg = (key, label, desc, opts, extra = {}) => row({ label, desc, ...extra }, `<div class="seg">${opts.map(([v, l]) => `<button data-seg="${key}" data-v="${v}" style="background:${st[key] === v ? '#eeeeee' : 'transparent'};color:${st[key] === v ? '#0b0b0b' : '#9a9a9a'};">${l}</button>`).join('')}</div>`);
   const sections = [
-    ['IMAGE', [
-      row({ label: 'Résolution interne', desc: "Rendu interne du jeu, multiple de la résolution Xbox d'origine." },
+    [t('secImage'), [
+      row({ label: t('res'), desc: t('resD') },
         `<select class="field" data-select="res" style="min-width:210px;padding:0 12px;cursor:pointer;">${RES.map(([w, h], i) => `<option value="${i}" ${st.res === i ? 'selected' : ''}>${w} × ${h}  (×${i + 1})</option>`).join('')}</select>`),
-      seg('aspect', "Format d'image", '4:3 respecte le jeu original. 16:9 élargit le champ de vision.', [['4:3', '4:3'], ['16:9', '16:9']]),
-      tg('cutsceneFull', 'Cinématiques en pleine hauteur', 'Recadre les cinématiques pour remplir un écran 16:9.', no169),
-      tg('menus43', "Menus conservés en 4:3", "Garde les menus et l'interface au format d'origine, sans les étirer.", no169),
-      seg('dlss', 'DLSS', "DLAA améliore l'anticrénelage sur les cartes NVIDIA RTX.", [['off', 'Off'], ['dlaa', 'DLAA']], S.dlssBuilt ? {} : { disabled: true, reason: "Indisponible avec cette version. Installez la version MSVC + DLSS depuis Installation." }),
-      tg('fullscreen', 'Plein écran au démarrage', 'F11 bascule entre fenêtre et plein écran en jeu.')]],
-    ['TEXTURES', [
-      tg('bilinear', 'Filtrage bilinéaire', 'Adoucit les textures agrandies.'),
-      tg('mips', 'Mipmaps + anisotrope 16×', 'Textures nettes au loin, sans scintillement.'),
-      tg('effects', 'Effets de rendu', 'Reflets au sol et éclairage des salles.'),
-      tg('hdPack', 'Pack de textures HD', "Remplace les textures d'origine par celles du dossier choisi."),
-      row({ label: 'Dossier du pack HD', desc: 'Les images y sont nommées par leur empreinte (voir le README).', disabled: !st.hdPack },
-        `<div class="mono" style="width:250px;height:34px;padding:0 10px;display:flex;align-items:center;background:#141414;border:1px solid #2e2e2e;border-radius:6px;font-size:11.5px;color:#c9c9c9;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">${esc(st.hdPath || 'Aucun dossier choisi')}</div>
-         <button class="btn sm" style="font-weight:400;" data-act="browseHd">Parcourir…</button>`)]],
-    ['JEU', [
-      tg('mods', 'Mod activé', 'Charge le mod installé au lancement du jeu.'),
-      tg('unlockAll', 'Tout débloquer', 'Personnages, lieux de combat et 10 000 points dès le départ.'),
-      tg('xboxPad', "Disposition de manette Xbox d'origine", 'LT/RT pour les gâchettes, LB/RB pour les boutons noir et blanc.')]]
+      seg('aspect', t('aspect'), t('aspectD'), [['4:3', '4:3'], ['16:9', '16:9']]),
+      tg('cutsceneFull', 'cine', 'cineD', no169),
+      tg('menus43', 'menus43', 'menus43D', no169),
+      seg('dlss', 'DLSS', t('dlssD'), [['off', 'Off'], ['dlaa', 'DLAA']], S.dlssBuilt ? {} : { disabled: true, reason: t('dlssNo') }),
+      tg('fullscreen', 'full', 'fullD')]],
+    [t('secTextures'), [
+      tg('bilinear', 'bil', 'bilD'),
+      tg('mips', 'mips', 'mipsD'),
+      tg('effects', 'fx', 'fxD'),
+      tg('hdPack', 'hd', 'hdD'),
+      row({ label: t('hdDir'), desc: t('hdDirD'), disabled: !st.hdPack },
+        `<div class="mono" style="width:250px;height:34px;padding:0 10px;display:flex;align-items:center;background:#141414;border:1px solid #2e2e2e;border-radius:6px;font-size:11.5px;color:#c9c9c9;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">${esc(st.hdPath || t('noFolder'))}</div>
+         <button class="btn sm" style="font-weight:400;" data-act="browseHd">${t('browse')}</button>`)]],
+    [t('secGame'), [
+      tg('mods', 'modOnT', 'modOnD'),
+      tg('unlockAll', 'unlock', 'unlockD'),
+      tg('xboxPad', 'pad', 'padD')]],
+    [t('secLauncher'), [
+      row({ label: t('lang'), desc: t('langD') },
+        `<select class="field" data-lang="1" style="min-width:210px;padding:0 12px;cursor:pointer;"><option value="auto" ${S.langPref === 'auto' ? 'selected' : ''}>${t('langAuto')}</option>${Object.entries(LANGS).map(([k, n]) => `<option value="${k}" ${S.langPref === k ? 'selected' : ''}>${n}</option>`).join('')}</select>`)]]
   ];
   const d = dirty();
   return `<div class="abs fade" style="display:flex;flex-direction:column;">
-    <div style="padding:30px 40px 18px;display:flex;align-items:baseline;gap:16px;"><h1 class="h1 cond">RÉGLAGES</h1><span style="color:#9a9a9a;font-size:13px;">Appliqués au prochain lancement du jeu.</span></div>
+    <div style="padding:30px 40px 18px;display:flex;align-items:baseline;gap:16px;"><h1 class="h1 cond">${t('settingsH')}</h1><span style="color:#9a9a9a;font-size:13px;">${t('settingsSub')}</span></div>
     <div id="scroll" style="flex:1;overflow:auto;padding:0 40px 28px;"><div style="max-width:820px;display:flex;flex-direction:column;gap:22px;">
-      ${sections.map(([t, rows]) => `<section><div class="sect">${t}</div><div class="card">${rows.join('')}</div></section>`).join('')}
+      ${sections.map(([x, rows]) => `<section><div class="sect">${x}</div><div class="card">${rows.join('')}</div></section>`).join('')}
     </div></div>
     <div style="flex:none;display:flex;align-items:center;gap:10px;padding:14px 40px;background:#111111;border-top:1px solid #222;">
-      ${d ? `<span style="display:flex;align-items:center;gap:8px;font-size:13px;"><span style="width:7px;height:7px;border-radius:4px;background:#eeeeee;"></span>Modifications non enregistrées</span>
-        <button data-act="revert" style="height:30px;padding:0 10px;border:0;background:transparent;color:#9a9a9a;font-size:13px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;">Annuler</button>`
-        : '<span style="font-size:13px;color:#9a9a9a;">Tous les réglages sont enregistrés.</span>'}
+      ${d ? `<span style="display:flex;align-items:center;gap:8px;font-size:13px;"><span style="width:7px;height:7px;border-radius:4px;background:#eeeeee;"></span>${t('unsaved')}</span>
+        <button data-act="revert" style="height:30px;padding:0 10px;border:0;background:transparent;color:#9a9a9a;font-size:13px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;">${t('cancel')}</button>`
+        : `<span style="font-size:13px;color:#9a9a9a;">${t('allSaved')}</span>`}
       <div style="flex:1;"></div>
-      <button class="btn" style="opacity:${d ? 1 : .5};" data-act="save">Enregistrer</button>
-      <button class="btn red" style="display:flex;align-items:center;gap:8px;" data-act="saveAndPlay">${I.play(13)}Enregistrer et jouer</button>
+      <button class="btn" style="opacity:${d ? 1 : .5};" data-act="save">${t('save')}</button>
+      <button class="btn red" style="display:flex;align-items:center;gap:8px;" data-act="saveAndPlay">${I.play(13)}${t('saveAndPlay')}</button>
     </div></div>`;
 }
 
 function mods() {
   const m = S.mod, busy = S.modBusy;
-  const dropTxt = busy ? 'Installation en cours…' : S.modDrag ? (m ? `Relâchez pour remplacer « ${esc(m.name)} »` : 'Relâchez pour installer') : (m ? 'Déposez un fichier .mod ici pour remplacer le mod actuel' : "Déposez un fichier .mod ici pour l'installer");
+  const dropTxt = busy ? t('dropBusy') : S.modDrag ? (m ? t('dropReplace', esc(m.name)) : t('dropInstall')) : (m ? t('dropHintReplace') : t('dropHint'));
   const cover = c => `<div class="abs" style="background:#1b1b1b url('${c || 'https://djffny.local/mod_defaut.jpg'}') center/cover no-repeat;"></div>`;
   let body;
   if (!m && !busy) {
     body = `<div class="drop ${S.modDrag ? 'over' : ''}" data-drop="mod" style="min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;border-radius:10px;">
       <img src="https://djffny.local/aucun_mod.png" alt="" style="width:320px;height:240px;" draggable="false">
-      <div class="cond" style="font-size:26px;margin-top:22px;">AUCUN MOD INSTALLÉ</div>
-      <div style="color:#9a9a9a;max-width:400px;margin-top:8px;line-height:1.5;">Les mods remplacent des personnages, des textures, des sons ou des modèles du jeu. Déposez un fichier .mod ici, ou choisissez-le sur votre ordinateur.</div>
-      <button class="btn light" style="margin-top:20px;" data-act="installMod">Choisir un fichier .mod</button></div>`;
+      <div class="cond" style="font-size:26px;margin-top:22px;">${t('noModH')}</div>
+      <div style="color:#9a9a9a;max-width:400px;margin-top:8px;line-height:1.5;">${t('noModP')}</div>
+      <button class="btn light" style="margin-top:20px;" data-act="installMod">${t('chooseMod')}</button></div>`;
   } else {
     const card = m && !busy ? `<div class="modcard"><div style="position:relative;aspect-ratio:3/4;">${cover(m.cover)}</div>
         <div style="padding:12px 14px 14px;display:flex;flex-direction:column;gap:5px;flex:1;">
           <div style="display:flex;align-items:baseline;gap:8px;"><span style="font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.name)}</span><span class="mono" style="font-size:11px;color:#9a9a9a;">v${esc(m.version)}</span></div>
           <div style="color:#9a9a9a;font-size:12.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:36px;">${esc(m.desc)}</div>
-          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;"><span style="flex:1;font-size:11.5px;color:#7a7a7a;">${esc(m.files)} fichiers · ${esc(m.date)}</span>
-          <button class="btn xs" style="height:26px;padding:0 10px;font-size:12px;color:#c9c9c9;" data-act="removeMod">Retirer</button></div></div></div>`
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;"><span style="flex:1;font-size:11.5px;color:#7a7a7a;">${esc(t('files', m.files))} · ${esc(m.date)}</span>
+          <button class="btn xs" style="height:26px;padding:0 10px;font-size:12px;color:#c9c9c9;" data-act="removeMod">${t('remove')}</button></div></div></div>`
       : `<div class="modcard"><div style="position:relative;aspect-ratio:3/4;">${cover('')}
           <div class="abs" style="background:rgba(11,11,11,.72);display:flex;flex-direction:column;justify-content:flex-end;padding:14px;">
-          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px;"><span>Installation…</span><span class="mono">${Math.round(busy.pct * 100)}%</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px;"><span>${t('installing')}</span><span class="mono">${Math.round(busy.pct * 100)}%</span></div>
           <div style="height:4px;border-radius:2px;background:#333;overflow:hidden;"><div style="height:100%;width:${Math.round(busy.pct * 100)}%;background:#eeeeee;transition:width .15s linear;"></div></div></div></div>
-          <div style="padding:12px 14px 14px;"><span style="font-weight:600;">${esc(busy.name || 'Nouveau mod')}</span></div></div>`;
+          <div style="padding:12px 14px 14px;"><span style="font-weight:600;">${esc(busy.name || t('newMod'))}</span></div></div>`;
     body = `<div style="display:flex;flex-direction:column;gap:16px;">
       <div class="drop ${S.modDrag ? 'over' : ''}" data-drop="mod" style="height:84px;display:flex;align-items:center;justify-content:center;gap:12px;border-radius:8px;color:#9a9a9a;font-size:13px;">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="15" x2="12" y2="4"/><polyline points="7.5,8.5 12,4 16.5,8.5"/><line x1="5" y1="20" x2="19" y2="20"/></svg><span>${dropTxt}</span></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(184px,1fr));gap:16px;">${card}</div></div>`;
   }
   return `<div class="abs fade" style="display:flex;flex-direction:column;" data-drop="mod">
-    <div style="padding:30px 40px 18px;display:flex;align-items:center;gap:16px;"><h1 class="h1 cond">MODS</h1>
-      <span style="color:#9a9a9a;font-size:13px;flex:1;">Un seul mod actif à la fois : en installer un nouveau remplace le précédent.${S.saved.mods ? '' : ' Mods désactivés dans Réglages.'}</span>
-      <button class="btn sm" style="display:flex;align-items:center;gap:8px;height:36px;" data-act="modsFolder">${I.folder}Ouvrir le dossier des mods</button>
-      <button class="btn light sm" style="display:flex;align-items:center;gap:8px;height:36px;font-weight:600;opacity:${busy ? .4 : 1};" data-act="installMod"><svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Installer un fichier .mod</button>
+    <div style="padding:30px 40px 18px;display:flex;align-items:center;gap:16px;"><h1 class="h1 cond">${t('mods').toUpperCase()}</h1>
+      <span style="color:#9a9a9a;font-size:13px;flex:1;">${t('modsSub')}${S.saved.mods ? '' : t('modsSubOff')}</span>
+      <button class="btn sm" style="display:flex;align-items:center;gap:8px;height:36px;" data-act="modsFolder">${I.folder}${t('modsFolder')}</button>
+      <button class="btn light sm" style="display:flex;align-items:center;gap:8px;height:36px;font-weight:600;opacity:${busy ? .4 : 1};" data-act="installMod"><svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>${t('installModBtn')}</button>
     </div>
     <div style="flex:1;overflow:auto;padding:0 40px 32px;">${body}</div></div>`;
 }
 
 function installPage() {
   const other = S.build === 'msvc' ? 'Clang' : 'MSVC + DLSS';
-  const line = (k, v, act) => `<div style="padding:16px 18px;color:#9a9a9a;font-size:13px;${k !== 'Dossier' ? 'border-top:1px solid #232323;' : ''}">${k}</div>
-    <div style="padding:16px 0;${k !== 'Dossier' ? 'border-top:1px solid #232323;' : ''}overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${v}</div>
-    <div style="${k !== 'Dossier' ? 'border-top:1px solid #232323;' : ''}align-self:stretch;display:flex;align-items:center;padding:0 14px;">${act || ''}</div>`;
-  const action = (t, d, b) => `<div class="row" style="padding:16px 18px;"><div><div style="font-weight:600;">${t}</div><div class="desc">${d}</div></div>${b}</div>`;
-  return `<div class="abs fade" style="overflow:auto;padding:30px 40px 32px;"><h1 class="h1 cond" style="margin-bottom:22px;">INSTALLATION</h1>
+  const line = (first, k, v, act) => `<div style="padding:16px 18px;color:#9a9a9a;font-size:13px;${first ? '' : 'border-top:1px solid #232323;'}">${k}</div>
+    <div style="padding:16px 0;${first ? '' : 'border-top:1px solid #232323;'}overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${v}</div>
+    <div style="${first ? '' : 'border-top:1px solid #232323;'}align-self:stretch;display:flex;align-items:center;padding:0 14px;">${act || ''}</div>`;
+  const action = (x, d, b) => `<div class="row" style="padding:16px 18px;"><div><div style="font-weight:600;">${x}</div><div class="desc">${d}</div></div>${b}</div>`;
+  return `<div class="abs fade" style="overflow:auto;padding:30px 40px 32px;"><h1 class="h1 cond" style="margin-bottom:22px;">${t('installH')}</h1>
     <div style="max-width:820px;display:flex;flex-direction:column;gap:22px;">
-      <section><div class="sect">INSTALLATION ACTUELLE</div>
+      <section><div class="sect">${t('current')}</div>
         <div class="card" style="display:grid;grid-template-columns:150px minmax(0,1fr) auto;align-items:center;">
-          ${line('Dossier', `<span class="mono" style="font-size:12.5px;">${esc(S.installDir)}</span>`, '<button class="btn xs" data-act="gameFolder">Ouvrir</button>')}
-          ${line('Version', `<span style="font-weight:600;">${buildName()}</span><span style="color:#9a9a9a;">${S.gameVersion ? ' · ' + esc(S.gameVersion) : ''}${S.builtOn ? ' · compilée le ' + esc(S.builtOn) : ''}${S.gameSize ? ' · ' + esc(S.gameSize) : ''}</span>`)}
-          ${line('Image disque', `<span style="display:flex;align-items:center;gap:8px;">${I.check(15, GREEN, 2.6)}${esc(S.isoName || 'Def Jam: Fight for NY (USA)')} · vérifiée</span>`)}
+          ${line(true, t('folder'), `<span class="mono" style="font-size:12.5px;">${esc(S.installDir)}</span>`, `<button class="btn xs" data-act="gameFolder">${t('open')}</button>`)}
+          ${line(false, t('version'), `<span style="font-weight:600;">${buildName()}</span><span style="color:#9a9a9a;">${S.gameVersion ? ' · ' + esc(S.gameVersion) : ''}${S.builtOn ? ' · ' + esc(t('builtOn', S.builtOn)) : ''}${S.gameBytes ? ' · ' + taille(S.gameBytes) : ''}</span>`)}
+          ${line(false, t('disc'), `<span style="display:flex;align-items:center;gap:8px;">${I.check(15, GREEN, 2.6)}${esc(S.isoName || 'Def Jam: Fight for NY (USA)')} · ${t('verified')}</span>`)}
         </div></section>
-      <section><div class="sect">ACTIONS</div><div class="card">
-        ${action('Changer de version', S.build === 'msvc' ? 'Passer à Clang, tout compris : rien à installer, mais sans DLSS. Le jeu sera recompilé.' : 'Passer à MSVC + DLSS. Nécessite Visual Studio 2022 avec le C++. Le jeu sera recompilé.', `<button class="btn sm" style="font-weight:400;" data-act="askSwitch">Passer à ${other}</button>`)}
-        ${action('Réparer / réinstaller', 'Recompile le jeu depuis votre image disque. Vos réglages et votre mod sont conservés.', '<button class="btn sm" style="font-weight:400;" data-act="askRepair">Réparer</button>')}
-        ${action('Désinstaller', "Supprime le jeu recompilé et ses fichiers. Votre image disque n'est pas modifiée.", '<button class="btn sm danger" data-act="askUninstall">Désinstaller</button>')}
+      <section><div class="sect">${t('actions')}</div><div class="card">
+        ${action(t('switchT'), S.build === 'msvc' ? t('switchToClang') : t('switchToMsvc'), `<button class="btn sm" style="font-weight:400;" data-act="askSwitch">${t('switchTo', other)}</button>`)}
+        ${action(t('repairT'), t('repairD'), `<button class="btn sm" style="font-weight:400;" data-act="askRepair">${t('repair')}</button>`)}
+        ${action(t('uninstT'), t('uninstD'), `<button class="btn sm danger" data-act="askUninstall">${t('uninstT')}</button>`)}
       </div></section></div></div>`;
 }
 
 function wizard() {
-  const labels = ['Dossier', 'Version', 'Image disque', 'Installation'], pr = S.prog;
+  const labels = [t('wFolder'), t('wVersion'), t('wDisc'), t('wInstall')], pr = S.prog, steps = STEPS();
   const stepper = labels.map((label, i) => {
     const done = i < S.wizStep || (i === 3 && pr && pr.result === 'ok'), cur = i === S.wizStep && !done;
     return `<div style="display:flex;align-items:center;gap:10px;flex:${i < 3 ? 1 : 'none'};"><div style="display:flex;align-items:center;gap:9px;">
@@ -384,68 +882,68 @@ function wizard() {
       <span style="font-size:13px;font-weight:600;color:${done || cur ? '#eeeeee' : '#6a6a6a'};white-space:nowrap;">${label}</span></div>
       ${i < 3 ? `<span style="flex:1;height:1.5px;min-width:16px;background:${i < S.wizStep ? '#eeeeee' : '#2e2e2e'};"></span>` : ''}</div>`;
   }).join('');
-  const h2 = t => `<h2 class="cond" style="margin:0;font-size:30px;">${t}</h2>`;
+  const h2 = x => `<h2 class="cond" style="margin:0;font-size:30px;">${x}</h2>`;
   let body = '';
-  if (S.wizStep === 0) body = `${h2('OÙ INSTALLER LE JEU ?')}<p style="margin:6px 0 22px;color:#9a9a9a;line-height:1.5;">Le jeu est reconstruit à partir de votre propre disque. Aucun fichier du jeu n'est téléchargé.</p>
-      <label style="display:block;font-size:12px;color:#9a9a9a;font-weight:600;margin-bottom:8px;">Dossier d'installation</label>
+  if (S.wizStep === 0) body = `${h2(t('whereH'))}<p style="margin:6px 0 22px;color:#9a9a9a;line-height:1.5;">${t('whereP')}</p>
+      <label style="display:block;font-size:12px;color:#9a9a9a;font-weight:600;margin-bottom:8px;">${t('installDir')}</label>
       <div style="display:flex;gap:8px;"><input id="dir" value="${esc(S.installDir)}" spellcheck="false" class="mono" style="flex:1;min-width:0;height:40px;padding:0 12px;background:#0f0f0f;color:#eeeeee;border:1px solid #2e2e2e;border-radius:6px;font-size:13px;outline:none;">
-        <button class="btn" style="height:40px;display:flex;align-items:center;gap:8px;background:#1b1b1b;font-weight:400;font-size:13px;" data-act="browseDir">${I.folder}Parcourir…</button></div>
-      <div style="display:flex;gap:24px;margin-top:16px;font-size:13px;"><div style="display:flex;align-items:center;gap:8px;">${S.freeSpace ? I.check(14, GREEN) : ''}<span>${esc(S.freeSpace)}</span></div><div style="color:#9a9a9a;">Espace requis : ${esc(S.required)}</div></div>
+        <button class="btn" style="height:40px;display:flex;align-items:center;gap:8px;background:#1b1b1b;font-weight:400;font-size:13px;" data-act="browseDir">${I.folder}${t('browse')}</button></div>
+      <div style="display:flex;gap:24px;margin-top:16px;font-size:13px;"><div style="display:flex;align-items:center;gap:8px;">${S.free ? I.check(14, GREEN) + `<span>${esc(t('freeOn', taille(S.free), S.drive))}</span>` : ''}</div><div style="color:#9a9a9a;">${esc(t('required', taille(4.5e9)))}</div></div>
       <div style="margin-top:14px;height:6px;border-radius:3px;background:#262626;overflow:hidden;display:flex;"><div style="width:${S.diskUsed};background:#5a5a5a;"></div><div style="width:2.5%;background:#eeeeee;"></div></div>`;
   else if (S.wizStep === 1) {
     const bc = k => `background:${S.build === k ? '#1f1f1f' : '#171717'};border:1.5px solid ${S.build === k ? '#eeeeee' : '#2a2a2a'};`;
     const radio = k => `<span style="width:20px;height:20px;border-radius:10px;border:1.5px solid ${S.build === k ? '#eeeeee' : '#4a4a4a'};display:flex;align-items:center;justify-content:center;"><span style="width:10px;height:10px;border-radius:5px;background:${S.build === k ? '#eeeeee' : 'transparent'};"></span></span>`;
-    body = `${h2('CHOISISSEZ UNE VERSION')}<p style="margin:6px 0 22px;color:#9a9a9a;line-height:1.5;">Vous pourrez changer plus tard depuis la page Installation.</p>
+    body = `${h2(t('pickH'))}<p style="margin:6px 0 22px;color:#9a9a9a;line-height:1.5;">${t('pickP')}</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-        <button class="buildcard" style="${bc('clang')}" data-act="pickClang"><div style="display:flex;align-items:center;justify-content:space-between;width:100%;"><span style="font-size:11px;letter-spacing:.14em;font-weight:700;color:#0b0b0b;background:#eeeeee;padding:3px 8px;border-radius:3px;">RECOMMANDÉ</span>${radio('clang')}</div>
-          <div class="cond" style="font-size:26px;line-height:1;">Clang, tout compris</div><div style="display:flex;flex-direction:column;gap:7px;font-size:13px;color:#c9c9c9;"><span>Rien à installer</span><span>Téléchargement d'environ 106 Mo</span><span style="color:#9a9a9a;">Pas de DLSS</span></div></button>
+        <button class="buildcard" style="${bc('clang')}" data-act="pickClang"><div style="display:flex;align-items:center;justify-content:space-between;width:100%;"><span style="font-size:11px;letter-spacing:.14em;font-weight:700;color:#0b0b0b;background:#eeeeee;padding:3px 8px;border-radius:3px;">${t('recommended')}</span>${radio('clang')}</div>
+          <div class="cond" style="font-size:26px;line-height:1;">${t('clangT')}</div><div style="display:flex;flex-direction:column;gap:7px;font-size:13px;color:#c9c9c9;"><span>${t('clang1')}</span><span>${t('clang2', taille(106e6))}</span><span style="color:#9a9a9a;">${t('clang3')}</span></div></button>
         <button class="buildcard" style="${bc('msvc')}" data-act="pickMsvc"><div style="display:flex;align-items:center;justify-content:space-between;width:100%;"><span style="font-size:11px;letter-spacing:.14em;font-weight:700;color:#9a9a9a;border:1px solid #3a3a3a;padding:2px 7px;border-radius:3px;">NVIDIA RTX</span>${radio('msvc')}</div>
-          <div class="cond" style="font-size:26px;line-height:1;">MSVC + DLSS</div><div style="display:flex;flex-direction:column;gap:7px;font-size:13px;color:#c9c9c9;"><span>Nécessite Visual Studio 2022 (C++)</span><span>DLSS / DLAA pour cartes NVIDIA RTX</span><span style="color:#9a9a9a;">Téléchargement d'environ 2 Mo</span></div></button>
+          <div class="cond" style="font-size:26px;line-height:1;">MSVC + DLSS</div><div style="display:flex;flex-direction:column;gap:7px;font-size:13px;color:#c9c9c9;"><span>${t('msvc1')}</span><span>${t('msvc2')}</span><span style="color:#9a9a9a;">${t('msvc3', taille(2e6))}</span></div></button>
       </div>
-      ${S.build === 'msvc' ? `<div style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;animation:ffin .2s ease;">${S.vs ? I.check(14, GREEN) + esc(S.vs) + ' détecté' : `<span style="color:#ffb3bc;">Visual Studio 2022 avec le C++ n'est pas installé.</span>`}</div>` : ''}`;
+      ${S.build === 'msvc' ? `<div style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;animation:ffin .2s ease;">${S.vs ? I.check(14, GREEN) + esc(t('vsFound', S.vs)) : `<span style="color:#ffb3bc;">${t('vsMissing')}</span>`}</div>` : ''}`;
   } else if (S.wizStep === 2) {
     const iso = S.iso, map = {
-      valid: { t: 'Def Jam: Fight for NY (USA)', d: 'Image valide. Version USA (NTSC-U) vérifiée.', b: 'oklch(0.45 0.09 150)', bg: GREEN, c: '#eeeeee', ok: 1 },
-      europe: { t: 'Version Europe détectée', d: 'Seule la version USA est prise en charge. Choisissez une autre image.', b: 'oklch(0.42 0.12 22)', bg: ERR, c: '#ffb3bc' },
-      other: { t: 'Version non prise en charge', d: "Ce n'est pas la version USA de Def Jam: Fight for NY. Choisissez une autre image.", b: 'oklch(0.42 0.12 22)', bg: ERR, c: '#ffb3bc' },
-      unreadable: { t: 'Fichier illisible', d: "Le fichier est incomplet, corrompu ou n'est pas une image de disque Xbox.", b: 'oklch(0.42 0.12 22)', bg: ERR, c: '#ffb3bc' } };
+      valid: { t: 'Def Jam: Fight for NY (USA)', d: t('isoValidD'), b: 'oklch(0.45 0.09 150)', bg: GREEN, c: '#eeeeee', ok: 1 },
+      europe: { t: t('isoEuropeT'), d: t('isoEuropeD'), b: 'oklch(0.42 0.12 22)', bg: ERR, c: '#ffb3bc' },
+      other: { t: t('isoOtherT'), d: t('isoOtherD'), b: 'oklch(0.42 0.12 22)', bg: ERR, c: '#ffb3bc' },
+      unreadable: { t: t('isoBadT'), d: t('isoBadD'), b: 'oklch(0.42 0.12 22)', bg: ERR, c: '#ffb3bc' } };
     const r = iso && map[iso.status];
-    body = `${h2('IMAGE DU DISQUE')}<p style="margin:6px 0 20px;color:#9a9a9a;line-height:1.5;">Sélectionnez l'image .iso de votre disque Xbox. Seule la version USA est prise en charge.</p>
+    body = `${h2(t('discH'))}<p style="margin:6px 0 20px;color:#9a9a9a;line-height:1.5;">${t('discP')}</p>
       <div class="drop" data-drop="iso" data-act="pickIso" style="height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-color:${S.isoDrag ? '#eeeeee' : '#333333'};border-radius:10px;background:${S.isoDrag ? 'rgba(255,255,255,.05)' : '#111111'};cursor:pointer;">
-        ${S.isoChecking ? `${spin(18)}<span style="font-size:13px;color:#c9c9c9;">Analyse de l'image…</span>` : `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#9a9a9a" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg><div style="font-size:14px;"><span style="font-weight:600;">Déposez un fichier .iso ici</span><span style="color:#9a9a9a;"> ou cliquez pour parcourir</span></div>`}</div>
+        ${S.isoChecking ? `${spin(18)}<span style="font-size:13px;color:#c9c9c9;">${t('analysing')}</span>` : `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#9a9a9a" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg><div style="font-size:14px;"><span style="font-weight:600;">${t('dropIso')}</span><span style="color:#9a9a9a;">${t('orClick')}</span></div>`}</div>
       ${r && !S.isoChecking ? `<div style="display:flex;align-items:flex-start;gap:12px;margin-top:14px;padding:14px 16px;border-radius:8px;background:#1b1b1b;border:1px solid ${r.b};animation:ffin .2s ease;">
         <span style="width:26px;height:26px;flex:none;border-radius:13px;display:flex;align-items:center;justify-content:center;background:${r.bg};color:#0b0b0b;">${r.ok ? I.check(14, 'currentColor', 3.4) : I.cross(12, 3.6)}</span>
         <div style="flex:1;min-width:0;"><div style="font-weight:600;color:${r.c};">${r.t}</div><div style="color:#9a9a9a;font-size:12.5px;margin-top:3px;line-height:1.45;">${r.d}</div>
-        <div class="mono" style="font-size:11.5px;color:#7a7a7a;margin-top:6px;word-break:break-all;">${esc(iso.file)} · ${esc(iso.size)}</div></div></div>` : ''}`;
+        <div class="mono" style="font-size:11.5px;color:#7a7a7a;margin-top:6px;word-break:break-all;">${esc(iso.file)} · ${taille(iso.bytes)}</div></div></div>` : ''}`;
   } else if (pr) {
     const run = !pr.result, rem = pr.pct > 0.02 ? mmss(pr.elapsed / pr.pct * (1 - pr.pct)) : '—';
-    if (run) body = `<div style="display:flex;align-items:flex-end;gap:16px;"><div style="flex:1;min-width:0;"><div style="font-size:12px;color:#9a9a9a;font-weight:600;">Étape ${pr.step + 1} sur 6</div><h2 class="cond" style="margin:4px 0 0;font-size:30px;">${STEPS[pr.step]}…</h2></div>
+    if (run) body = `<div style="display:flex;align-items:flex-end;gap:16px;"><div style="flex:1;min-width:0;"><div style="font-size:12px;color:#9a9a9a;font-weight:600;">${t('stepOf', pr.step + 1, 6)}</div><h2 class="cond" style="margin:4px 0 0;font-size:30px;">${steps[pr.step]}…</h2></div>
         <div class="cond" style="font-size:40px;line-height:1;font-variant-numeric:tabular-nums;">${Math.round(pr.pct * 100)}%</div></div>
       <div style="height:6px;border-radius:3px;background:#262626;overflow:hidden;margin-top:14px;"><div style="height:100%;width:${Math.round(pr.pct * 100)}%;background:#eeeeee;transition:width .12s linear;"></div></div>
-      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:#9a9a9a;font-variant-numeric:tabular-nums;"><span>Temps écoulé ${mmss(pr.elapsed)}</span><span>Restant environ ${rem}</span></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;margin-top:20px;">${STEPS.map((l, i) => {
+      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:#9a9a9a;font-variant-numeric:tabular-nums;"><span>${t('elapsed', mmss(pr.elapsed))}</span><span>${t('remaining', rem)}</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;margin-top:20px;">${steps.map((l, i) => {
         const done = i < pr.step, cur = i === pr.step;
         return `<div style="display:flex;align-items:center;gap:10px;height:26px;font-size:13px;color:${done ? '#c9c9c9' : cur ? '#eeeeee' : '#6a6a6a'};"><span style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;flex:none;">${done ? I.check(15, GREEN, 3) : cur ? spin(13) : '<span style="width:8px;height:8px;border-radius:4px;border:1.5px solid #4a4a4a;"></span>'}</span>
           <span style="flex:1;font-weight:${cur ? 600 : 400};">${l}</span><span class="mono" style="font-size:11px;color:#7a7a7a;">${cur ? Math.round(pr.stepPct * 100) + ' %' : ''}</span></div>`; }).join('')}</div>`;
     else if (pr.result === 'ok') body = `<div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:10px 0 4px;animation:ffin .3s ease;">
         <span style="width:56px;height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;background:${GREEN};color:#0b0b0b;">${I.check(28, 'currentColor', 3)}</span>
-        <h2 class="cond" style="margin:18px 0 0;font-size:38px;">LE JEU EST PRÊT</h2><div style="color:#9a9a9a;margin-top:6px;">Recompilé en ${mmss(pr.elapsed)} · ${buildName()}${S.gameSize ? ' · ' + esc(S.gameSize) : ''}</div>
-        <button class="play cond" style="margin-top:24px;height:56px;min-width:220px;font-size:24px;" data-act="finish">${I.play(18)}JOUER</button></div>`;
+        <h2 class="cond" style="margin:18px 0 0;font-size:38px;">${t('readyH')}</h2><div style="color:#9a9a9a;margin-top:6px;">${t('readyP', mmss(pr.elapsed))} · ${buildName()}${S.gameBytes ? ' · ' + taille(S.gameBytes) : ''}</div>
+        <button class="play cond" style="margin-top:24px;height:56px;min-width:220px;font-size:24px;" data-act="finish">${I.play(18)}${t('playBig')}</button></div>`;
     else body = `<div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:10px 0 4px;animation:ffin .3s ease;">
         <span style="width:56px;height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;background:${ERR};color:#0b0b0b;">${I.cross(22, 3.4)}</span>
-        <h2 class="cond" style="margin:18px 0 0;font-size:38px;">L'INSTALLATION A ÉCHOUÉ</h2><div style="color:#9a9a9a;margin-top:6px;">L'installation s'est arrêtée à l'étape ${(pr.failStep != null ? pr.failStep : pr.step) + 1} sur 6. Votre image disque n'a pas été modifiée.</div>
-        ${pr.error ? `<div class="mono" style="margin-top:12px;padding:8px 12px;border-radius:6px;background:#0f0f0f;border:1px solid #2a2a2a;font-size:12px;color:#ff9aa6;user-select:text;">${esc(pr.error)}</div>` : ''}
-        <div style="display:flex;gap:10px;margin-top:22px;"><button class="btn" style="height:40px;" data-act="log">Ouvrir le journal</button><button class="btn light" style="height:40px;" data-act="retry">Réessayer</button></div></div>`;
+        <h2 class="cond" style="margin:18px 0 0;font-size:38px;">${t('failH')}</h2><div style="color:#9a9a9a;margin-top:6px;">${t('failP', (pr.failStep != null ? pr.failStep : pr.step) + 1)}</div>
+        ${pr.errKey ? `<div class="mono" style="margin-top:12px;padding:8px 12px;border-radius:6px;background:#0f0f0f;border:1px solid #2a2a2a;font-size:12px;color:#ff9aa6;user-select:text;">${esc(t('e_' + pr.errKey, pr.errArg))}</div>` : ''}
+        <div style="display:flex;gap:10px;margin-top:22px;"><button class="btn" style="height:40px;" data-act="log">${t('openLog')}</button><button class="btn light" style="height:40px;" data-act="retry">${t('retry')}</button></div></div>`;
     body += `<div style="margin-top:20px;border:1px solid #242424;border-radius:8px;overflow:hidden;">
       <button data-act="toggleLog" style="width:100%;height:38px;display:flex;align-items:center;gap:8px;padding:0 14px;border:0;background:#181818;color:#c9c9c9;font-size:12.5px;cursor:pointer;text-align:left;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(${S.logOpen ? 0 : -90}deg);transition:transform .18s;"><polyline points="6,9 12,15 18,9"/></svg>
-        <span style="flex:1;">${S.logOpen ? 'Masquer le journal' : 'Afficher le journal'}</span><span class="mono" style="font-size:11px;color:#6a6a6a;">${pr.log.length} lignes</span></button>
+        <span style="flex:1;">${S.logOpen ? t('hideLog') : t('showLog')}</span><span class="mono" style="font-size:11px;color:#6a6a6a;">${t('lines', pr.log.length)}</span></button>
       ${S.logOpen ? `<div id="log" class="mono" style="height:150px;overflow:auto;padding:10px 14px;background:#0c0c0c;font-size:11.5px;line-height:1.65;user-select:text;">${pr.log.slice(-400).map(l => `<div style="display:flex;gap:12px;"><span style="color:#555;">${l.time}</span><span style="color:${l.level === 'error' ? '#ff9aa6' : '#b5b5b5'};white-space:pre-wrap;word-break:break-all;">${esc(l.text)}</span></div>`).join('')}</div>` : ''}</div>`;
   }
   const running = S.wizStep === 3 && pr && !pr.result;
   const showFooter = !(pr && pr.result && S.wizStep === 3);
   const nextOff = (S.wizStep === 2 && !(S.iso && S.iso.status === 'valid')) || (S.wizStep === 1 && S.build === 'msvc' && !S.vs);
-  const note = running ? `${buildName()} · ${esc(S.installDir)}` : ['Étape 1 sur 4', 'Étape 2 sur 4', 'Étape 3 sur 4', ''][S.wizStep];
+  const note = running ? `${buildName()} · ${esc(S.installDir)}` : S.wizStep < 3 ? t('stepOf', S.wizStep + 1, 4) : '';
   return `<div class="abs">${heroBg('installation.jpg')}
     <div class="abs" style="background:radial-gradient(ellipse at center,rgba(11,11,11,.55) 0%,rgba(11,11,11,.9) 75%);"></div>
     <div class="abs" style="display:flex;align-items:center;justify-content:center;padding:28px;">
@@ -454,37 +952,39 @@ function wizard() {
         <div style="flex:1;overflow:auto;padding:28px;"><div class="${S.wizStep < 3 ? 'fade' : ''}">${body}</div></div>
         ${showFooter ? `<div style="display:flex;align-items:center;gap:10px;padding:16px 28px;border-top:1px solid #222;background:#121212;">
           <span style="flex:1;font-size:12.5px;color:#9a9a9a;">${note}</span>
-          ${S.wizStep > 0 && S.wizStep < 3 ? '<button class="btn" data-act="back">Retour</button>' : ''}
-          ${S.wizStep < 3 ? `<button class="btn light" style="opacity:${nextOff ? .35 : 1};" data-act="next">${S.wizStep === 2 ? "Lancer l'installation" : 'Suivant'}</button>` : ''}
-          ${running ? '<button class="btn" data-act="askCancel">Annuler</button>' : ''}</div>` : ''}
+          ${S.wizStep > 0 && S.wizStep < 3 ? `<button class="btn" data-act="back">${t('back')}</button>` : ''}
+          ${S.wizStep < 3 ? `<button class="btn light" style="opacity:${nextOff ? .35 : 1};" data-act="next">${S.wizStep === 2 ? t('startInstall') : t('next')}</button>` : ''}
+          ${running ? `<button class="btn" data-act="askCancel">${t('cancel')}</button>` : ''}</div>` : ''}
       </div></div></div>`;
 }
 
 function overlays() {
-  let h = `<div style="position:absolute;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:30;pointer-events:none;">${S.toasts.map(t => {
-    const e = t.kind === 'error';
+  let h = `<div style="position:absolute;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:30;pointer-events:none;">${S.toasts.map(x => {
+    const e = x.kind === 'error';
     return `<div style="pointer-events:auto;width:340px;display:flex;align-items:flex-start;gap:10px;padding:12px 12px 12px 14px;background:#1f1f1f;border:1px solid ${e ? 'oklch(0.4 0.11 22)' : '#2e2e2e'};border-radius:8px;box-shadow:0 12px 30px -8px rgba(0,0,0,.7);animation:ffin .25s ease;">
       <span style="width:18px;height:18px;flex:none;border-radius:9px;margin-top:1px;display:flex;align-items:center;justify-content:center;background:${e ? ERR : GREEN};color:#0b0b0b;">${e ? I.cross(9, 4.5) : I.check(10, 'currentColor', 4)}</span>
-      <div style="flex:1;min-width:0;font-size:13px;line-height:1.45;"><div style="font-weight:600;">${esc(t.title)}</div><div style="color:#9a9a9a;margin-top:2px;user-select:text;">${esc(t.text)}</div></div>
-      <button class="icobtn" style="width:22px;height:22px;border-radius:4px;color:#7a7a7a;" data-act="closeToast" data-id="${t.id}">${I.cross(11, 2.6)}</button></div>`; }).join('')}</div>`;
+      <div style="flex:1;min-width:0;font-size:13px;line-height:1.45;"><div style="font-weight:600;">${esc(x.title)}</div><div style="color:#9a9a9a;margin-top:2px;user-select:text;">${esc(x.text)}</div></div>
+      <button class="icobtn" style="width:22px;height:22px;border-radius:4px;color:#7a7a7a;" data-act="closeToast" data-id="${x.id}">${I.cross(11, 2.6)}</button></div>`; }).join('')}</div>`;
   if (S.modal) {
     const m = S.modal;
     h += `<div class="overlay" data-act="closeModal"><div class="dialog" data-stop="1" style="width:440px;padding:24px;">
       <div class="cond" style="font-size:24px;line-height:1.1;">${esc(m.title)}</div><div style="color:#9a9a9a;margin-top:10px;line-height:1.55;">${esc(m.body)}</div>
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:24px;"><button class="btn" data-act="closeModal">${esc(m.cancel || 'Annuler')}</button>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:24px;"><button class="btn" data-act="closeModal">${esc(m.cancel || t('cancel'))}</button>
       <button class="btn ${m.danger ? 'red' : 'light'}" data-act="confirmModal">${esc(m.confirm)}</button></div></div></div>`;
   }
   if (S.about) {
+    const lic = [[t('licPort'), 'MIT'], ['Toolkit xboxrecomp', 'MIT · LGPL-2.1 (NV2A, xemu)'], ['Microsoft WebView2', t('licSdk')],
+      ['LLVM / Clang (llvm-mingw)', 'Apache-2.0 + LLVM'], ['Python · capstone · CMake', 'PSF · BSD · BSD-3'], ['NVIDIA Streamline (DLSS)', t('licNvidia')]];
     h += `<div class="overlay" data-act="closeAbout"><div class="dialog" data-stop="1" style="width:520px;max-height:calc(100% - 48px);overflow:auto;">
       <div style="display:flex;align-items:center;gap:16px;padding:24px 24px 18px;">
         <img src="https://djffny.local/icone.png" alt="" onerror="this.removeAttribute('src')" style="width:64px;height:64px;flex:none;border-radius:14px;background:repeating-linear-gradient(135deg,#2a2a2a 0 6px,#222 6px 12px);">
         <div style="flex:1;"><div class="cond" style="font-size:24px;line-height:1;">FIGHT FOR NY — RECOMPILED</div><div class="mono" style="color:#9a9a9a;font-size:12.5px;margin-top:6px;">Launcher v${esc(S.version)}${S.installed ? ' · ' + buildName() : ''}</div>
           <div style="color:#c9c9c9;font-size:12.5px;margin-top:4px;">by comoria08</div></div>
         <button class="icobtn" style="width:30px;height:30px;align-self:flex-start;" data-act="closeAbout">${I.cross(13)}</button></div>
-      <div style="padding:0 24px;color:#c9c9c9;line-height:1.55;font-size:13px;">Port PC non officiel, réalisé par des fans. Ce projet n'est affilié ni à Electronic Arts, ni à Def Jam Recordings, ni à AKI Corporation. Aucun fichier du jeu n'est distribué : le jeu est reconstruit à partir de votre propre image disque.</div>
-      <div class="sect" style="margin:22px 24px 8px;">LICENCES</div>
-      <div style="margin:0 24px;border:1px solid #262626;border-radius:8px;">${S.licences.map(([n, l], i) => `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;${i ? 'border-top:1px solid #262626;' : ''}font-size:13px;"><span style="flex:1;">${esc(n)}</span><span class="mono" style="font-size:11.5px;color:#9a9a9a;">${esc(l)}</span></div>`).join('')}</div>
-      <div style="display:flex;gap:10px;padding:20px 24px 24px;"><button class="btn sm" style="font-weight:400;height:36px;" data-act="repo">Code source</button><button class="btn sm" style="font-weight:400;height:36px;" data-act="licences">Textes complets des licences</button></div></div></div>`;
+      <div style="padding:0 24px;color:#c9c9c9;line-height:1.55;font-size:13px;">${t('aboutP')}</div>
+      <div class="sect" style="margin:22px 24px 8px;">${t('licences')}</div>
+      <div style="margin:0 24px;border:1px solid #262626;border-radius:8px;">${lic.map(([n, l], i) => `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;${i ? 'border-top:1px solid #262626;' : ''}font-size:13px;"><span style="flex:1;">${esc(n)}</span><span class="mono" style="font-size:11.5px;color:#9a9a9a;">${esc(l)}</span></div>`).join('')}</div>
+      <div style="display:flex;gap:10px;padding:20px 24px 24px;"><button class="btn sm" style="font-weight:400;height:36px;" data-act="repo">${t('source')}</button><button class="btn sm" style="font-weight:400;height:36px;" data-act="licences">${t('licTexts')}</button></div></div></div>`;
   }
   return h;
 }
@@ -508,9 +1008,12 @@ document.addEventListener('click', e => {
   if (el.dataset.seg) return setS(el.dataset.seg, el.dataset.v);
   const f = A[el.dataset.act]; if (f) f(el);
 });
-document.addEventListener('change', e => { if (e.target.dataset.select) setS(e.target.dataset.select, +e.target.value); });
+document.addEventListener('change', e => {
+  if (e.target.dataset.select) setS(e.target.dataset.select, +e.target.value);
+  if (e.target.dataset.lang) setLang(e.target.value);
+  if (e.target.id === 'dir') send({ type: 'checkFolder', path: S.installDir });
+});
 document.addEventListener('input', e => { if (e.target.id === 'dir') S.installDir = e.target.value; });
-document.addEventListener('change', e => { if (e.target.id === 'dir') send({ type: 'checkFolder', path: S.installDir }); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') set({ modal: null, about: false }); });
 document.addEventListener('dragover', e => {
   e.preventDefault(); const z = e.target.closest('[data-drop]'); if (!z) return;
@@ -522,7 +1025,7 @@ document.addEventListener('drop', e => {
   e.preventDefault(); const z = e.target.closest('[data-drop]'), files = [...(e.dataTransfer && e.dataTransfer.files || [])];
   set({ modDrag: false, isoDrag: false });
   if (!z || !files.length) return;
-  if (files.length > 1) toast('error', 'Un seul fichier à la fois', `Seul « ${files[0].name} » sera pris.`);
+  if (files.length > 1) toast('error', t('oneFile'), t('oneFileX', files[0].name));
   if (z.dataset.drop === 'iso') { set({ isoChecking: true }); send({ type: 'pickIso', dropped: true }, [files[0]]); }
   else installMod([files[0]]);
 });
@@ -533,23 +1036,24 @@ send({ type: 'getState' });
 // ---------- simulation, sans hote (navigateur) ----------
 function simuler(msg) {
   const r = (m, ms = 300) => setTimeout(() => onHost(m), ms);
+  const nav = (navigator.language || 'en').slice(0, 2);
   switch (msg.type) {
-    case 'getState': return r({ type: 'state', state: { installed: false, freeSpace: '214 Go libres sur C:', diskUsed: '58%', vs: 'Visual Studio Community 2022 17.12', version: '1.1.0',
-      licences: [['Ce port (lanceur et runtime)', 'MIT'], ['Toolkit xboxrecomp', 'MIT, LGPL-2.1'], ['Microsoft WebView2', 'Microsoft']] } }, 50);
-    case 'browseFolder': return r({ type: 'folderPicked', path: 'D:\\Jeux\\DefJam-FFNY', free: '1,2 To libres sur D:', used: '31%' }, 300);
-    case 'pickIso': return r({ type: 'isoChecked', status: 'valid', file: 'D:\\ISO\\Def Jam - Fight for NY (USA).iso', size: '6,95 Go' }, 800);
+    case 'getState': return r({ type: 'state', state: { installed: false, free: 214e9, drive: 'C:', used: '58%', vs: 'Visual Studio Community 2022 17.12', version: '1.2.0',
+      lang: TX[nav] ? nav : 'en', langWindows: TX[nav] ? nav : 'en', langPref: 'auto' } }, 50);
+    case 'browseFolder': return r({ type: 'folderPicked', path: 'D:\\Jeux\\DefJam-FFNY', free: 1.2e12, drive: 'D:', used: '31%' }, 300);
+    case 'pickIso': return r({ type: 'isoChecked', status: 'valid', file: 'D:\\ISO\\Def Jam - Fight for NY (USA).iso', bytes: 3.02e9 }, 800);
     case 'startInstall': {
       let p = 0; const iv = setInterval(() => { p += 0.01; const step = Math.min(5, Math.floor(p * 6));
-        onHost({ type: 'installProgress', step, stepPct: (p * 6) % 1, pct: Math.min(p, 1), elapsed: p * 600, line: Math.random() < 0.2 ? 'ligne de journal simulée' : null });
-        if (p >= 1) { clearInterval(iv); onHost({ type: 'installDone', ok: true, size: '3,1 Go' }); } }, 60); return;
+        onHost({ type: 'installProgress', step, stepPct: (p * 6) % 1, pct: Math.min(p, 1), elapsed: p * 600, line: Math.random() < 0.2 ? 'log line' : null });
+        if (p >= 1) { clearInterval(iv); onHost({ type: 'installDone', ok: true, bytes: 3.66e9 }); } }, 60); return;
     }
     case 'launch': r({ type: 'gameStarted' }, 300); return r({ type: 'gameExited' }, 4000);
     case 'saveSettings': return r({ type: 'settingsSaved' }, 100);
     case 'installMod': { let p = 0; const iv = setInterval(() => { p += 0.1; onHost({ type: 'modProgress', name: 'Def Jam Vendetta', pct: Math.min(p, 1) });
-      if (p >= 1) { clearInterval(iv); onHost({ type: 'mod', mod: { name: 'Def Jam Vendetta', version: '2026-10-30', desc: 'Les 44 combattants de Def Jam Vendetta (PS2).', files: 1879, date: '30/10/2026' } }); } }, 120); return; }
+      if (p >= 1) { clearInterval(iv); onHost({ type: 'mod', mod: { name: 'Def Jam Vendetta', version: '2026-10-30', desc: '44 fighters from Def Jam Vendetta (PS2).', files: 1879, date: '30/10/2026' } }); } }, 120); return; }
     case 'removeMod': return r({ type: 'mod', mod: null });
     case 'uninstall': return r({ type: 'uninstalled' }, 500);
-    default: return r({ type: 'info', title: msg.type, text: JSON.stringify(msg) }, 100);
+    default: return r({ type: 'info', key: '', title: msg.type, text: JSON.stringify(msg) }, 100);
   }
 }
 </script>

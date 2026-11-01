@@ -14,6 +14,17 @@
  * decrit dans <jeu>\game_files\mod_actif\ (liste de ses fichiers, sauvegarde de ce qu'il a remplace).
  * DJFFNY_PAQUET=<zip> remplace le telechargement par un paquet local (essais avant publication).
  * DJFFNY_OUTILS=1 ouvre les outils de developpement de la page.
+ *
+ * Langues (1.2.0) : francais, anglais, espagnol, allemand, portugais, d'apres la langue de Windows
+ * (ou le choix fait dans Reglages, "langue" de djffny.ini). La page traduit tout ; l'exe ne lui
+ * envoie que des cles (toasts, erreurs) et des nombres (tailles en octets).
+ *
+ * Mises a jour (1.2.0) : chaque release porte versions.json (paquet/fabriquer_release.ps1) :
+ * - "lanceur" plus recent que cet exe : il telecharge le nouveau DJFFNY.exe, se remplace et
+ *   redemarre (--apres-maj) ;
+ * - "jeu" different de l'empreinte du manifest.json installe (ou "outils" pour la version Clang) :
+ *   mise a jour incrementale, seuls les fichiers changes sont remplaces, puis installer.ps1
+ *   -MiseAJour ne refait que ce qu'il faut (ni extraction du disque, ni traduction si inutile).
  */
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -42,8 +53,9 @@ using Microsoft::WRL::ComPtr;
 using std::string;
 using std::wstring;
 
-#define VERSION_LANCEUR "1.1.0"
-#define VERSION_LANCEUR_W L"1.1.0"
+#define VERSION_LANCEUR "1.2.0"
+#define VERSION_LANCEUR_W L"1.2.0"
+#define WM_RELANCER     (WM_APP + 3)
 #define DEPOT           L"comoria08/defjam_recomp"
 #define HOTE            L"https://djffny.local/"
 #define WM_HOTE         (WM_APP + 1)        /* lParam : string* JSON a poster a la page */
@@ -55,6 +67,22 @@ static const char *ETAPES[6]   = { "Téléchargement", "Vérification du disque"
                                    "Recompilation vers C", "Compilation", "Finitions" };
 
 static HWND g_fen;
+static HANDLE g_un;                          /* une seule fenetre du lanceur a la fois */
+static string g_lang = "en";                 /* fr, en, es, de, pt */
+static bool g_apres_maj;                     /* relance apres la mise a jour du lanceur */
+
+static string langue_windows()
+{
+    switch (PRIMARYLANGID(GetUserDefaultUILanguage())) {
+    case LANG_FRENCH: return "fr";
+    case LANG_SPANISH: return "es";
+    case LANG_GERMAN: return "de";
+    case LANG_PORTUGUESE: return "pt";
+    default: return "en";
+    }
+}
+/* les lignes que l'exe ajoute au journal d'installation : francais ou anglais, comme installer.ps1 */
+static const char *tr(const char *fr, const char *en) { return g_lang == "fr" ? fr : en; }
 static ComPtr<ICoreWebView2Environment> g_env;
 static ComPtr<ICoreWebView2Controller> g_ctrl;
 static ComPtr<ICoreWebView2> g_vue;
@@ -159,8 +187,9 @@ static bool est_dossier(const wstring &p) { DWORD a = GetFileAttributesW(p.c_str
 
 static wstring dossier_appdata()
 {
-    wchar_t *p = NULL; wstring d;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &p))) d = wstring(p) + L"\\DJFFNY";
+    wchar_t *p = NULL, ev[MAX_PATH]; wstring d;
+    if (GetEnvironmentVariableW(L"DJFFNY_DONNEES", ev, MAX_PATH)) d = ev;   /* essais : une config a part */
+    else if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &p))) d = wstring(p) + L"\\DJFFNY";
     CoTaskMemFree(p);
     CreateDirectoryW(d.c_str(), NULL);
     return d;
@@ -260,9 +289,9 @@ static void poster(const string &json)
 {
     PostMessageW(g_fen, WM_HOTE, 0, (LPARAM)new string(json));
 }
-static void toast(const char *kind, const string &titre, const string &texte)
+static void toast(const char *kind, const char *cle, const string &arg = string())
 {
-    poster("{\"type\":" + jstr(string(kind)) + ",\"title\":" + jstr(titre) + ",\"text\":" + jstr(texte) + "}");
+    poster("{\"type\":" + jstr(string(kind)) + ",\"key\":" + jstr(string(cle)) + ",\"arg\":" + jstr(arg) + "}");
 }
 
 /* ── defjam.ini : les reglages du jeu (le meme fichier que le lanceur du jeu, src/lanceur.c) ── */
@@ -437,9 +466,9 @@ static bool http_get(const wstring &url, string *mem, const wstring &fichier,
     URL_COMPONENTS uc = { sizeof uc };
     wchar_t host[256], path[2048];
     uc.lpszHostName = host; uc.dwHostNameLength = 256; uc.lpszUrlPath = path; uc.dwUrlPathLength = 2048;
-    if (!WinHttpCrackUrl(url.c_str(), 0, 0, &uc)) { if (err) *err = "adresse invalide"; return false; }
+    if (!WinHttpCrackUrl(url.c_str(), 0, 0, &uc)) { if (err) *err = "bad URL"; return false; }
     HINTERNET s = WinHttpOpen(L"DJFFNY/" VERSION_LANCEUR_W, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0);
-    if (!s) { if (err) *err = "WinHTTP indisponible"; return false; }
+    if (!s) { if (err) *err = "WinHTTP unavailable"; return false; }
     DWORD proto = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
     WinHttpSetOption(s, WINHTTP_OPTION_SECURE_PROTOCOLS, &proto, sizeof proto);
     HINTERNET c = WinHttpConnect(s, host, uc.nPort, 0);
@@ -451,24 +480,24 @@ static bool http_get(const wstring &url, string *mem, const wstring &fichier,
         wchar_t lg[32] = L"0"; DWORD lsz = sizeof lg;
         WinHttpQueryHeaders(r, WINHTTP_QUERY_CONTENT_LENGTH, NULL, lg, &lsz, NULL);
         unsigned long long total = _wtoi64(lg), recu = 0;
-        if (code != 200) { if (err) *err = "le serveur a répondu " + std::to_string(code); }
+        if (code != 200) { if (err) *err = "HTTP " + std::to_string(code); }
         else {
             FILE *f = fichier.empty() ? NULL : _wfopen(fichier.c_str(), L"wb");
-            if (!fichier.empty() && !f) { if (err) *err = "impossible d'écrire " + u8(fichier); }
+            if (!fichier.empty() && !f) { if (err) *err = "cannot write " + u8(fichier); }
             else {
                 ok = true;
                 char b[65536]; DWORD n;
                 for (;;) {
-                    if (!WinHttpReadData(r, b, sizeof b, &n)) { ok = false; if (err) *err = "connexion interrompue"; break; }
+                    if (!WinHttpReadData(r, b, sizeof b, &n)) { ok = false; if (err) *err = "connection lost"; break; }
                     if (!n) break;
                     if (f) fwrite(b, 1, n, f); else mem->append(b, n);
                     recu += n;
-                    if (progres && !progres(recu, total)) { ok = false; if (err) *err = "annulé"; break; }
+                    if (progres && !progres(recu, total)) { ok = false; if (err) *err = "cancelled"; break; }
                 }
                 if (f) fclose(f);
             }
         }
-    } else if (err && err->empty()) *err = "impossible de joindre " + u8(host);
+    } else if (err && err->empty()) *err = "cannot reach " + u8(host);
     if (r) WinHttpCloseHandle(r);
     if (c) WinHttpCloseHandle(c);
     WinHttpCloseHandle(s);
@@ -547,7 +576,7 @@ static void verifier_iso(const wstring &iso)
             string h = sha1_morceau(iso, pos, t);
             statut = h == SHA1_USA ? "valid" : h == SHA1_EUROPE ? "europe" : h.empty() ? "unreadable" : "other";
         }
-        poster("{\"type\":\"isoChecked\",\"status\":" + jstr(statut) + ",\"file\":" + jstr(iso) + ",\"size\":" + jstr(go(sz)) + "}");
+        poster("{\"type\":\"isoChecked\",\"status\":" + jstr(statut) + ",\"file\":" + jstr(iso) + ",\"bytes\":" + std::to_string(sz) + "}");
     }).detach();
 }
 
@@ -613,7 +642,7 @@ static void installer_mod(const wstring &fichier)
         std::vector<string> noms;
         DWORD c = executer(tar + L" -t -f \"" + fichier + L"\"", L"", [&](const string &l) { noms.push_back(l); }, NULL);
         if (c || noms.empty() || info.empty()) {
-            toast("error", "Ce fichier n'est pas un mod", "Un fichier .mod est une archive zip avec un mod.ini à la racine.");
+            toast("error", "notMod");
             poster("{\"type\":\"mod\",\"mod\":" + mod_json() + "}"); g_mod_occupe = false; return;
         }
         Ini mi; { wstring tmp = dossier_appdata() + L"\\mod.ini"; ecrire_fichier(tmp, info); mi.charger(tmp); DeleteFileW(tmp.c_str()); }
@@ -653,8 +682,8 @@ static void installer_mod(const wstring &fichier)
         SYSTEMTIME st; GetLocalTime(&st); char date[16]; snprintf(date, sizeof date, "%02d/%02d/%04d", st.wDay, st.wMonth, st.wYear);
         mi.set("fichiers", std::to_string(fichiers)); mi.set("date", date); mi.set("source", u8(fichier));
         mi.enregistrer(d + L"\\mod.ini");
-        if (c) toast("error", "Installation du mod incomplète", "L'extraction a échoué (code " + std::to_string(c) + ").");
-        else toast("info", "Mod installé", nom + " sera chargé au prochain lancement.");
+        if (c) toast("error", "modIncomplete", std::to_string(c));
+        else toast("info", "modInstalled", nom);
         poster("{\"type\":\"mod\",\"mod\":" + mod_json() + "}");
         g_mod_occupe = false;
     }).detach();
@@ -722,6 +751,90 @@ static void raccourci(const wstring &exe)
     CoTaskMemFree(bureau);
 }
 
+static bool installe();
+static string versions_json();
+
+/* Copie src vers dst, dossiers compris. */
+static bool copier(const wstring &src, const wstring &dst)
+{
+    creer_dossiers(dst.substr(0, dst.find_last_of(L'\\')));
+    return CopyFileW(src.c_str(), dst.c_str(), FALSE) != 0;
+}
+
+/* Telecharge (ou prend DJFFNY_PAQUET) un paquet et l'extrait dans tmp ; rend le dossier du paquet. */
+static wstring paquet_extrait(Avance &av, const wstring &dir, const wstring &nom, const wstring &tmp, string &e, string &a)
+{
+    wstring zip = dir + L"\\" + nom, local;
+    wchar_t ev[MAX_PATH]; if (GetEnvironmentVariableW(L"DJFFNY_PAQUET", ev, MAX_PATH)) local = ev;
+    if (!local.empty()) {
+        av.envoyer(tr("paquet local : ", "local package: ") + u8(local));
+        if (!CopyFileW(local.c_str(), zip.c_str(), FALSE)) { e = "localCopy"; return L""; }
+    } else {
+        wstring url = wstring(L"https://github.com/") + DEPOT + L"/releases/latest/download/" + nom;
+        av.envoyer("GET " + u8(url));
+        DWORD dern = 0; string err;
+        if (!http_get(url, NULL, zip, [&](unsigned long long r, unsigned long long t) {
+                if (GetTickCount() - dern > 200) { dern = GetTickCount();
+                    { std::lock_guard<std::mutex> l(av.mx); av.pas = t ? (double)r / t : 0; }
+                    av.envoyer(""); }
+                return !g_annule.load(); }, &err)) { e = "download"; a = err; DeleteFileW(zip.c_str()); return L""; }
+    }
+    supprimer_arbre(tmp); creer_dossiers(tmp);
+    av.envoyer(tr("extraction du paquet", "extracting the package"));
+    DWORD c = executer(systeme(L"tar.exe") + L" -x -f \"" + zip + L"\" -C \"" + tmp + L"\"", L"", nullptr, g_job_install);
+    DeleteFileW(zip.c_str());
+    wstring src = c ? L"" : trouver_paquet(tmp);
+    if (src.empty()) e = "badPackage";
+    return src;
+}
+
+/* La mise a jour incrementale : le manifeste du nouveau paquet (empreinte de chaque fichier)
+ * contre celui de l'installation ; seuls les fichiers changes sont copies, les disparus retires,
+ * et le dossier outils (version Clang) n'est remplace que si son empreinte a change. Les dates
+ * des fichiers inchanges ne bougent pas : la compilation qui suit ne reprend que le reste. */
+static bool mettre_a_jour_fichiers(Avance &av, const wstring &pq, const string &build, string &e, string &a)
+{
+    wstring dir = pq.substr(0, pq.find_last_of(L'\\')), tmp = dir + L"\\maj_extraction";
+    wstring src = paquet_extrait(av, dir, nom_paquet("msvc"), tmp, e, a);   /* le paquet leger : sans outils */
+    if (src.empty()) { supprimer_arbre(tmp); return false; }
+    string jn = lire_fichier(src + L"\\manifest.json"), ja = lire_fichier(pq + L"\\manifest.json");
+    const char *pn = jn.c_str(), *pa = ja.c_str();
+    Val nouv = lire(pn), anc = lire(pa);
+    if (nouv["fichiers"].t != Val::OBJ) { e = "badPackage"; supprimer_arbre(tmp); return false; }
+    unsigned changes = 0, retires = 0;
+    for (auto &kv : nouv["fichiers"].o) {
+        wstring rel = w16(kv.first); for (auto &c : rel) if (c == L'/') c = L'\\';
+        if (anc["fichiers"][kv.first.c_str()].str() == kv.second.str() && existe(pq + L"\\" + rel)) continue;
+        if (!copier(src + L"\\" + rel, pq + L"\\" + rel)) { e = "placeFailed"; a = kv.first; supprimer_arbre(tmp); return false; }
+        changes++;
+    }
+    for (auto &kv : anc["fichiers"].o) {
+        if (nouv["fichiers"].o.count(kv.first)) continue;
+        wstring rel = w16(kv.first); for (auto &c : rel) if (c == L'/') c = L'\\';
+        if (DeleteFileW((pq + L"\\" + rel).c_str())) retires++;
+    }
+    copier(src + L"\\manifest.json", pq + L"\\manifest.json");
+    supprimer_arbre(tmp);
+    char b[160]; snprintf(b, sizeof b, tr("%u fichier(s) mis à jour, %u retiré(s)", "%u file(s) updated, %u removed"), changes, retires);
+    av.envoyer(b);
+    if (build == "clang") {
+        string vj = versions_json(); const char *pv = vj.c_str();
+        string voulu = lire(pv)["outils"].str(), actuel;
+        { std::lock_guard<std::mutex> l(g_cfg_mx); actuel = g_cfg.get("outils"); }
+        if (!voulu.empty() && voulu != actuel) {
+            av.envoyer(tr("les outils ont changé : téléchargement du paquet complet", "the tools changed: downloading the full package"));
+            wstring t2 = dir + L"\\maj_outils";
+            wstring s2 = paquet_extrait(av, dir, nom_paquet("clang"), t2, e, a);
+            if (s2.empty() || !existe(s2 + L"\\outils")) { if (e.empty()) e = "badPackage"; supprimer_arbre(t2); return false; }
+            supprimer_arbre(pq + L"\\outils");
+            if (!MoveFileExW((s2 + L"\\outils").c_str(), (pq + L"\\outils").c_str(), MOVEFILE_COPY_ALLOWED)) { e = "placeFailed"; a = "outils"; supprimer_arbre(t2); return false; }
+            supprimer_arbre(t2);
+            std::lock_guard<std::mutex> l(g_cfg_mx); g_cfg.v["outils"] = voulu;
+        }
+    }
+    return true;
+}
+
 static void installer(Val m)
 {
     if (g_install_en_cours.exchange(true)) return;
@@ -742,21 +855,36 @@ static void installer(Val m)
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION jl = {}; jl.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         SetInformationJobObject(g_job_install, JobObjectExtendedLimitInformation, &jl, sizeof jl);
 
-        string erreur; int etape_err = 0;
-        auto echec = [&](const string &e) { erreur = e; etape_err = av.etape; };
-        wstring pq = reparer ? ancien : L"";
+        bool maj = raison == "update" && installe();
+        string erreur, arg; int etape_err = 0;
+        auto echec = [&](const char *cle, const string &a = string()) { erreur = cle; arg = a; etape_err = av.etape; };
+        wstring pq = reparer || maj ? ancien : L"";
 
-        if (dir.empty()) echec("aucun dossier d'installation");
-        else if (!existe(iso)) echec("image disque introuvable : " + u8(iso));
+        /* une installation, une reparation ou un changement de version refont tout depuis l'image
+         * disque : si elle a disparu, la page la redemande (une mise a jour n'en a pas besoin) */
+        if (!maj && !dir.empty() && !existe(iso)) {
+            poster("{\"type\":\"needIso\",\"file\":" + jstr(iso) + "}");
+            CloseHandle(g_job_install); g_job_install = NULL;
+            g_install_en_cours = false;
+            CoUninitialize();
+            return;
+        }
+        if (dir.empty()) echec("noDir");
         creer_dossiers(dir);
 
+        /* 1 bis. mise a jour : seuls les fichiers changes, et les outils s'ils ont change */
+        if (erreur.empty() && maj) {
+            string e, a;
+            if (!mettre_a_jour_fichiers(av, pq, build, e, a)) echec(e.c_str(), a);
+        }
+
         /* 1. le paquet : telecharge (ou DJFFNY_PAQUET), puis extrait a cote */
-        if (erreur.empty() && !reparer) {
+        if (erreur.empty() && !reparer && !maj) {
             wstring zip = dir + L"\\" + nom_paquet(build), local;
             wchar_t ev[MAX_PATH]; if (GetEnvironmentVariableW(L"DJFFNY_PAQUET", ev, MAX_PATH)) local = ev;
             if (!local.empty()) {
-                av.envoyer("paquet local : " + u8(local));
-                if (!CopyFileW(local.c_str(), zip.c_str(), FALSE)) echec("copie du paquet local impossible");
+                av.envoyer(tr("paquet local : ", "local package: ") + u8(local));
+                if (!CopyFileW(local.c_str(), zip.c_str(), FALSE)) echec("localCopy");
             } else {
                 wstring url = wstring(L"https://github.com/") + DEPOT + L"/releases/latest/download/" + nom_paquet(build);
                 av.envoyer("GET " + u8(url));
@@ -766,26 +894,30 @@ static void installer(Val m)
                             { std::lock_guard<std::mutex> l(av.mx); av.pas = t ? (double)r / t : 0; }
                             av.envoyer(""); }
                         return !g_annule.load(); }, &erreur))
-                    echec("téléchargement : " + erreur);
+                    echec("download", erreur);
                 else {
                     WIN32_FILE_ATTRIBUTE_DATA a; unsigned long long z = 0;
                     if (GetFileAttributesExW(zip.c_str(), GetFileExInfoStandard, &a)) z = ((unsigned long long)a.nFileSizeHigh << 32) | a.nFileSizeLow;
-                    av.envoyer("téléchargé : " + u8(nom_paquet(build)) + " (" + go(z) + ")");
+                    av.envoyer(tr("téléchargé : ", "downloaded: ") + u8(nom_paquet(build)) + " (" + go(z) + ")");
                 }
             }
             if (erreur.empty() && !g_annule) {
                 wstring tmp = dir + L"\\extraction";
                 supprimer_arbre(tmp); creer_dossiers(tmp);
-                av.envoyer("extraction du paquet");
+                av.envoyer(tr("extraction du paquet", "extracting the package"));
                 DWORD c = executer(systeme(L"tar.exe") + L" -x -f \"" + zip + L"\" -C \"" + tmp + L"\"", L"", nullptr, g_job_install);
                 wstring trouve = c ? L"" : trouver_paquet(tmp);
-                if (trouve.empty()) echec("le paquet téléchargé est illisible");
+                if (trouve.empty()) echec("badPackage");
                 else {
                     wstring nom = trouve.substr(trouve.find_last_of(L'\\') + 1), cible = dir + L"\\" + nom;
                     if (cible == ancien) { cible += L"-neuf"; }
                     supprimer_arbre(cible);
-                    if (!MoveFileExW(trouve.c_str(), cible.c_str(), 0)) echec("impossible de placer le paquet dans " + u8(dir));
-                    else pq = cible;
+                    if (!MoveFileExW(trouve.c_str(), cible.c_str(), 0)) echec("placeFailed", u8(dir));
+                    else {
+                        pq = cible;
+                        string mf = lire_fichier(pq + L"\\manifest.json"); const char *q = mf.c_str();
+                        std::lock_guard<std::mutex> l(g_cfg_mx); g_cfg.v["outils"] = lire(q)["outils"].str();
+                    }
                 }
                 supprimer_arbre(tmp);
             }
@@ -798,7 +930,8 @@ static void installer(Val m)
             wstring ps1 = pq + L"\\defjam_recomp\\installeur\\installer.ps1";
             wstring cmd = systeme(L"WindowsPowerShell\\v1.0\\powershell.exe") +
                 L" -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[Text.Encoding]::UTF8; & " +
-                ps_quote(ps1) + L" -Iso " + ps_quote(iso) + L" -Oui -Langue fr" + (build == "clang" ? L" -SansDLSS" : L"") + L"; exit $LASTEXITCODE\"";
+                ps_quote(ps1) + (maj ? wstring(L" -MiseAJour") : L" -Iso " + ps_quote(iso)) + L" -Oui -Langue " + (g_lang == "fr" ? L"fr" : L"en") +
+                (build == "clang" ? L" -SansDLSS" : L"") + L"; exit $LASTEXITCODE\"";
             std::atomic<bool> fini(false);
             std::thread tic([&] { while (!fini) { Sleep(500); if (!fini) av.envoyer(""); } });
             DWORD c = executer(cmd, pq + L"\\defjam_recomp", [&](const string &l) {
@@ -814,18 +947,18 @@ static void installer(Val m)
             }, g_job_install);
             fini = true; tic.join();
             if (g_annule) {}
-            else if (c) echec(derniere_erreur.empty() ? "l'installateur s'est arrêté (code " + std::to_string(c) + ")" : derniere_erreur);
+            else if (c) { if (derniere_erreur.empty()) echec("installerStopped", std::to_string(c)); else echec("installer", derniere_erreur); }
         }
 
         /* 3. finitions : reglages et mod de l'ancienne installation, configuration, raccourci */
         if (erreur.empty() && !g_annule) {
-            av.aller(5); av.envoyer("finitions");
+            av.aller(5); av.envoyer(tr("finitions", "finishing"));
             if (!ancien.empty() && ancien != pq && existe(ancien)) {
                 wstring a = ancien + L"\\defjam_recomp", n = pq + L"\\defjam_recomp";
                 CopyFileW((a + L"\\defjam.ini").c_str(), (n + L"\\defjam.ini").c_str(), FALSE);
                 if (existe(a + L"\\game_files\\mods")) { supprimer_arbre(n + L"\\game_files\\mods"); MoveFileExW((a + L"\\game_files\\mods").c_str(), (n + L"\\game_files\\mods").c_str(), MOVEFILE_COPY_ALLOWED); }
                 if (existe(a + L"\\game_files\\mod_actif")) MoveFileExW((a + L"\\game_files\\mod_actif").c_str(), (n + L"\\game_files\\mod_actif").c_str(), MOVEFILE_COPY_ALLOWED);
-                av.envoyer("réglages et mod repris de l'installation précédente");
+                av.envoyer(tr("réglages et mod repris de l'installation précédente", "settings and mod kept from the previous install"));
                 supprimer_arbre(ancien);
                 if (pq.size() > 5 && pq.compare(pq.size() - 5, 5, L"-neuf") == 0) {
                     wstring propre = pq.substr(0, pq.size() - 5);
@@ -844,20 +977,21 @@ static void installer(Val m)
             unsigned long long sz = taille_arbre(pq);
             {
                 std::lock_guard<std::mutex> l(g_cfg_mx);
-                g_cfg.v["dossier"] = u8(dir); g_cfg.v["paquet"] = u8(pq); g_cfg.v["iso"] = u8(iso);
-                g_cfg.v["version_jeu_build"] = build; g_cfg.v["date"] = date; g_cfg.v["taille"] = go(sz);
+                g_cfg.v["dossier"] = u8(dir); g_cfg.v["paquet"] = u8(pq); if (!maj) g_cfg.v["iso"] = u8(iso);
+                g_cfg.v["version_jeu_build"] = build; g_cfg.v["date"] = date; g_cfg.v["octets"] = std::to_string(sz);
+                g_cfg.v.erase("taille");
                 if (!tag.empty()) g_cfg.v["version_jeu"] = tag;
                 g_cfg.enregistrer();
             }
-            poster(string("{\"type\":\"installDone\",\"ok\":true,\"size\":") + jstr(go(sz)) + ",\"build\":" + jstr(build) +
+            poster(string("{\"type\":\"installDone\",\"ok\":true,\"bytes\":") + std::to_string(sz) + ",\"build\":" + jstr(build) +
                    ",\"dlssBuilt\":" + (dlss_construit() ? "true" : "false") + "}");
         } else if (g_annule) {
-            if (!reparer && !pq.empty() && pq != ancien) supprimer_arbre(pq);
+            if (!reparer && !maj && !pq.empty() && pq != ancien) supprimer_arbre(pq);
             poster("{\"type\":\"installCancelled\"}");
         } else {
-            av.envoyer("ÉCHEC : " + erreur, "error");
+            av.envoyer(string(tr("ÉCHEC : ", "FAILED: ")) + erreur + (arg.empty() ? "" : " " + arg), "error");
             char b[64]; snprintf(b, sizeof b, ",\"step\":%d}", etape_err);
-            poster("{\"type\":\"installDone\",\"ok\":false,\"error\":" + jstr(erreur) + b);
+            poster("{\"type\":\"installDone\",\"ok\":false,\"errKey\":" + jstr(erreur) + ",\"errArg\":" + jstr(arg) + b);
         }
         CloseHandle(g_job_install); g_job_install = NULL;
         g_install_en_cours = false;
@@ -872,11 +1006,11 @@ static HANDLE g_jeu_proc;
 static void lancer_jeu()
 {
     if (g_jeu_proc) return;
-    if (!installe()) { toast("error", "Le jeu n'est pas installé", "Installez-le depuis la page Installation."); return; }
+    if (!installe()) { toast("error", "notInstalled"); return; }
     STARTUPINFOW si = { sizeof si }; PROCESS_INFORMATION pi;
     wstring cmd = L"\"" + exe_jeu() + L"\" --sans-fenetre";
     if (!CreateProcessW(NULL, &cmd[0], NULL, NULL, FALSE, 0, NULL, jeu().c_str(), &si, &pi)) {
-        toast("error", "Le jeu n'a pas pu démarrer", "Windows a refusé de lancer defjam_recomp.exe (erreur " + std::to_string(GetLastError()) + ").");
+        toast("error", "launchRefused", std::to_string(GetLastError()));
         return;
     }
     CloseHandle(pi.hThread);
@@ -892,16 +1026,71 @@ static void lancer_jeu()
 
 /* ── Mises a jour ──────────────────────────────────────────────────── */
 
+/* versions.json de la derniere release ("" si introuvable : une release d'avant la 1.2.0) */
+static string versions_json()
+{
+    string j;
+    wchar_t ev[MAX_PATH];
+    if (GetEnvironmentVariableW(L"DJFFNY_VERSIONS", ev, MAX_PATH)) return lire_fichier(ev);   /* essais */
+    if (!http_get(wstring(L"https://github.com/") + DEPOT + L"/releases/latest/download/versions.json", &j, L"", nullptr, NULL)) return string();
+    return j;
+}
+
+static bool plus_recente(const string &a, const string &b)      /* a > b, versions x.y.z */
+{
+    int x[3] = { 0 }, y[3] = { 0 };
+    sscanf(a.c_str(), "%d.%d.%d", &x[0], &x[1], &x[2]);
+    sscanf(b.c_str(), "%d.%d.%d", &y[0], &y[1], &y[2]);
+    for (int i = 0; i < 3; i++) if (x[i] != y[i]) return x[i] > y[i];
+    return false;
+}
+
 static void verifier_maj()
 {
     std::thread([] {
-        string j;
-        if (!http_get(wstring(L"https://api.github.com/repos/") + DEPOT + L"/releases/latest", &j, L"", nullptr, NULL)) return;
+        string j = versions_json();
+        if (j.empty()) return;
         const char *p = j.c_str(); Val v = lire(p);
-        string tag = v["tag_name"].str(), titre = v["name"].str();
-        string actuel; { std::lock_guard<std::mutex> l(g_cfg_mx); actuel = g_cfg.get("version_jeu"); }
-        if (tag.empty() || actuel.empty() || tag == actuel) return;
-        poster("{\"type\":\"update\",\"version\":" + jstr(tag) + ",\"notes\":" + jstr(titre + (titre.empty() ? "" : ". ") + "Le jeu sera recompilé depuis votre image disque.") + "}");
+        string lanceur = v["lanceur"].str(), jeu_ = v["jeu"].str(), outils = v["outils"].str();
+        if (plus_recente(lanceur, VERSION_LANCEUR)) {
+            poster("{\"type\":\"update\",\"kind\":\"lanceur\",\"version\":" + jstr(lanceur) + "}");
+            return;
+        }
+        if (!installe() || jeu_.empty()) return;
+        string mf = lire_fichier(paquet() + L"\\manifest.json"); const char *q = mf.c_str();
+        string empreinte = lire(q)["empreinte"].str(), build, outils_inst;
+        { std::lock_guard<std::mutex> l(g_cfg_mx); build = g_cfg.get("version_jeu_build"); outils_inst = g_cfg.get("outils"); }
+        if (empreinte != jeu_ || (build == "clang" && !outils.empty() && outils != outils_inst))
+            poster("{\"type\":\"update\",\"kind\":\"jeu\",\"version\":" + jstr(lanceur) + "}");
+    }).detach();
+}
+
+/* Le lanceur se remplace par celui de la derniere release, puis redemarre (WM_RELANCER). L'exe en
+ * cours peut etre renomme mais pas ecrase : il devient DJFFNY.exe.ancien, efface au demarrage. */
+static void maj_lanceur()
+{
+    std::thread([] {
+        wchar_t moi[MAX_PATH]; GetModuleFileNameW(NULL, moi, MAX_PATH);
+        wchar_t t[MAX_PATH]; GetTempPathW(MAX_PATH, t);
+        wstring neuf = wstring(t) + L"DJFFNY_nouveau.exe", ancien = wstring(moi) + L".ancien";
+        string err;
+        wchar_t ev[MAX_PATH];
+        bool ok = GetEnvironmentVariableW(L"DJFFNY_LANCEUR", ev, MAX_PATH)          /* essais : un exe local */
+            ? CopyFileW(ev, neuf.c_str(), FALSE) != 0
+            : http_get(wstring(L"https://github.com/") + DEPOT + L"/releases/latest/download/DJFFNY.exe", NULL, neuf, nullptr, &err);
+        string tete = ok ? lire_fichier(neuf).substr(0, 2) : string();
+        if (!ok || tete != "MZ") { DeleteFileW(neuf.c_str()); toast("error", "launcherUpdateFailed", err); return; }
+        DeleteFileW(ancien.c_str());
+        if (!MoveFileExW(moi, ancien.c_str(), MOVEFILE_REPLACE_EXISTING) || !CopyFileW(neuf.c_str(), moi, FALSE)) {
+            MoveFileExW(ancien.c_str(), moi, MOVEFILE_REPLACE_EXISTING);
+            DeleteFileW(neuf.c_str()); toast("error", "launcherUpdateFailed", "rename"); return;
+        }
+        /* la copie installee a cote du jeu aussi, si ce n'est pas elle qui tourne */
+        string d; { std::lock_guard<std::mutex> l(g_cfg_mx); d = g_cfg.get("dossier"); }
+        wstring copie = w16(d) + L"\\DJFFNY.exe";
+        if (!d.empty() && _wcsicmp(copie.c_str(), moi) && existe(copie)) CopyFileW(neuf.c_str(), copie.c_str(), FALSE);
+        DeleteFileW(neuf.c_str());
+        PostMessageW(g_fen, WM_RELANCER, 0, 0);
     }).detach();
 }
 
@@ -927,10 +1116,9 @@ static string infos_disque(const wstring &chemin)
     while (!racine.empty() && !existe(racine)) { size_t s = racine.find_last_of(L'\\'); if (s == wstring::npos) break; racine.resize(s); }
     if (racine.size() == 2) racine += L"\\";
     ULARGE_INTEGER libre, total;
-    if (racine.empty() || !GetDiskFreeSpaceExW(racine.c_str(), &libre, &total, NULL)) return "\"free\":\"\",\"used\":\"50%\"";
+    if (racine.empty() || !GetDiskFreeSpaceExW(racine.c_str(), &libre, &total, NULL)) return "\"free\":0,\"drive\":\"\",\"used\":\"50%\"";
     char u[16]; snprintf(u, sizeof u, "%.0f%%", 100.0 * (1.0 - (double)libre.QuadPart / total.QuadPart));
-    string lecteur = u8(racine.substr(0, 2));
-    return "\"free\":" + jstr(go(libre.QuadPart) + " libres sur " + lecteur) + ",\"used\":" + jstr(string(u));
+    return "\"free\":" + std::to_string(libre.QuadPart) + ",\"drive\":" + jstr(u8(racine.substr(0, 2))) + ",\"used\":" + jstr(string(u));
 }
 
 /* Le chemin d'un fichier depose sur la page (postMessageWithAdditionalObjects). */
@@ -957,13 +1145,12 @@ static string etat_json()
     s += ",\"build\":" + jstr(g_cfg.get("version_jeu_build").empty() ? string("clang") : g_cfg.get("version_jeu_build"));
     s += ",\"vs\":" + jstr(g_vs) + ",\"dlssBuilt\":" + (ok && dlss_construit() ? "true" : "false");
     s += ",\"version\":\"" VERSION_LANCEUR "\",\"gameVersion\":" + jstr(g_cfg.get("version_jeu"));
-    s += ",\"builtOn\":" + jstr(g_cfg.get("date")) + ",\"gameSize\":" + jstr(g_cfg.get("taille"));
+    s += ",\"builtOn\":" + jstr(g_cfg.get("date")) + ",\"gameBytes\":" + std::to_string(_atoi64(g_cfg.get("octets").c_str()));
+    s += ",\"lang\":" + jstr(g_lang) + ",\"langWindows\":" + jstr(langue_windows()) + ",\"langPref\":" + jstr(g_cfg.get("langue").empty() ? string("auto") : g_cfg.get("langue"));
+    s += ",\"apresMaj\":" + string(g_apres_maj ? "true" : "false");
     wstring iso = w16(g_cfg.get("iso"));
     s += ",\"isoName\":" + jstr(iso.empty() ? string() : u8(iso.substr(iso.find_last_of(L'\\') + 1)));
     if (ok) s += ",\"settings\":" + reglages_json() + ",\"mod\":" + mod_json();
-    s += ",\"licences\":[[\"Ce port (lanceur et runtime)\",\"MIT\"],[\"Toolkit xboxrecomp\",\"MIT · LGPL-2.1 (NV2A, xemu)\"],"
-         "[\"Microsoft WebView2\",\"Licence du SDK Microsoft\"],[\"LLVM / Clang (llvm-mingw)\",\"Apache-2.0 + LLVM\"],"
-         "[\"Python · capstone · CMake\",\"PSF · BSD · BSD-3\"],[\"NVIDIA Streamline (DLSS)\",\"Licence NVIDIA\"]]";
     return s + "}";
 }
 
@@ -976,7 +1163,17 @@ static void message(const string &json, ICoreWebView2WebMessageReceivedEventArgs
     string t = m["type"].str();
     if (t == "getState") {
         poster("{\"type\":\"state\",\"state\":" + etat_json() + "}");
-        if (installe()) verifier_maj();
+        verifier_maj();
+    } else if (t == "setLang") {
+        string l = m["lang"].str();
+        {
+            std::lock_guard<std::mutex> g(g_cfg_mx);
+            if (l == "auto" || l.empty()) g_cfg.v.erase("langue"); else g_cfg.v["langue"] = l;
+            g_cfg.enregistrer();
+        }
+        g_lang = (l == "auto" || l.empty()) ? langue_windows() : l;
+    } else if (t == "updateLauncher") {
+        maj_lanceur();
     } else if (t == "browseFolder") {
         wstring d = choisir(true, NULL, NULL);
         if (!d.empty()) poster("{\"type\":\"folderPicked\",\"path\":" + jstr(d) + "," + infos_disque(d) + "}");
@@ -996,7 +1193,7 @@ static void message(const string &json, ICoreWebView2WebMessageReceivedEventArgs
         lancer_jeu();
     } else if (t == "saveSettings") {
         if (enregistrer_reglages(m["settings"])) poster("{\"type\":\"settingsSaved\"}");
-        else toast("error", "Réglages non enregistrés", "Impossible d'écrire defjam.ini.");
+        else toast("error", "settingsNotSaved");
     } else if (t == "browseHdPack") {
         wstring d = choisir(true, NULL, NULL);
         if (!d.empty()) poster("{\"type\":\"hdPicked\",\"path\":" + jstr(d) + "}");
@@ -1007,7 +1204,7 @@ static void message(const string &json, ICoreWebView2WebMessageReceivedEventArgs
         if (f.empty()) f = choisir(false, L"Mod Def Jam (*.mod)", L"*.mod;*.zip");
         if (!f.empty()) installer_mod(f);
     } else if (t == "removeMod") {
-        std::thread([] { retirer_mod(); toast("info", "Mod retiré", "Les fichiers qu'il remplaçait ont été remis."); poster("{\"type\":\"mod\",\"mod\":null}"); }).detach();
+        std::thread([] { retirer_mod(); toast("info", "modRemoved"); poster("{\"type\":\"mod\",\"mod\":null}"); }).detach();
     } else if (t == "openLog") {
         wstring a = jeu() + L"\\run_stderr.txt", b = jeu() + L"\\installation.log";
         FILETIME fa = {}, fb = {}; WIN32_FILE_ATTRIBUTE_DATA d;
@@ -1015,7 +1212,7 @@ static void message(const string &json, ICoreWebView2WebMessageReceivedEventArgs
         if (GetFileAttributesExW(b.c_str(), GetFileExInfoStandard, &d)) fb = d.ftLastWriteTime;
         if (paquet().empty() || (!existe(a) && !existe(b))) {
             /* une installation ratee : son journal est dans le paquet en cours */
-            toast("info", "Pas encore de journal", "Le journal du jeu est écrit pendant une partie.");
+            toast("info", "noLog");
         } else ouvrir(CompareFileTime(&fa, &fb) >= 0 && existe(a) ? a : b);
     } else if (t == "openFolder") {
         string w = m["what"].str();
@@ -1032,14 +1229,32 @@ static void message(const string &json, ICoreWebView2WebMessageReceivedEventArgs
             {
                 std::lock_guard<std::mutex> l(g_cfg_mx);
                 wstring dir = w16(g_cfg.get("dossier"));
-                g_cfg.v.erase("paquet"); g_cfg.v.erase("version_jeu"); g_cfg.v.erase("taille"); g_cfg.v.erase("date");
+                g_cfg.v.erase("paquet"); g_cfg.v.erase("version_jeu"); g_cfg.v.erase("octets"); g_cfg.v.erase("date"); g_cfg.v.erase("outils");
                 g_cfg.enregistrer();
                 (void)dir;
             }
             if (ok) poster("{\"type\":\"uninstalled\"}");
-            else toast("error", "Désinstallation incomplète", "Certains fichiers sont encore utilisés. Fermez le jeu et réessayez.");
+            else toast("error", "uninstallIncomplete");
         }).detach();
     }
+}
+
+/* Les deux textes des boites de message de Windows (la page n'est pas la pour les traduire). */
+static const wchar_t *natif(int quoi)
+{
+    static const wchar_t *t[2][5] = {
+        { L"Le moteur WebView2 de Microsoft est introuvable.\n\nInstallez « Microsoft Edge WebView2 Runtime » (https://go.microsoft.com/fwlink/p/?LinkId=2124703), puis relancez DJFFNY.exe.",
+          L"Microsoft's WebView2 engine was not found.\n\nInstall \"Microsoft Edge WebView2 Runtime\" (https://go.microsoft.com/fwlink/p/?LinkId=2124703), then run DJFFNY.exe again.",
+          L"No se encontró el motor WebView2 de Microsoft.\n\nInstala «Microsoft Edge WebView2 Runtime» (https://go.microsoft.com/fwlink/p/?LinkId=2124703) y vuelve a abrir DJFFNY.exe.",
+          L"Die WebView2-Engine von Microsoft wurde nicht gefunden.\n\nInstalliere „Microsoft Edge WebView2 Runtime“ (https://go.microsoft.com/fwlink/p/?LinkId=2124703) und starte DJFFNY.exe neu.",
+          L"O mecanismo WebView2 da Microsoft não foi encontrado.\n\nInstale o «Microsoft Edge WebView2 Runtime» (https://go.microsoft.com/fwlink/p/?LinkId=2124703) e abra o DJFFNY.exe novamente." },
+        { L"Une installation est en cours. Quitter l'arrête.\n\nQuitter quand même ?",
+          L"An installation is in progress. Quitting stops it.\n\nQuit anyway?",
+          L"Hay una instalación en curso. Salir la detiene.\n\n¿Salir de todos modos?",
+          L"Eine Installation läuft. Beenden bricht sie ab.\n\nTrotzdem beenden?",
+          L"Há uma instalação em andamento. Sair a interrompe.\n\nSair mesmo assim?" } };
+    int i = g_lang == "fr" ? 0 : g_lang == "es" ? 2 : g_lang == "de" ? 3 : g_lang == "pt" ? 4 : 1;
+    return t[quoi][i];
 }
 
 /* ── Les fichiers servis a la page (https://djffny.local/...) ──────── */
@@ -1108,9 +1323,7 @@ static void demarrer_webview()
         rappel<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler, HRESULT, ICoreWebView2Environment *>(
         [](HRESULT r, ICoreWebView2Environment *env) -> HRESULT {
             if (FAILED(r) || !env) {
-                MessageBoxW(g_fen, L"Le moteur WebView2 de Microsoft est introuvable.\n\nInstallez « Microsoft Edge WebView2 Runtime » "
-                            L"(https://go.microsoft.com/fwlink/p/?LinkId=2124703), puis relancez DJFFNY.exe.",
-                            L"Def Jam: Fight for NY", MB_ICONERROR);
+                MessageBoxW(g_fen, natif(0), L"Def Jam: Fight for NY", MB_ICONERROR);
                 PostQuitMessage(1); return S_OK;
             }
             g_env = env;
@@ -1145,8 +1358,7 @@ static void demarrer_webview()
                 }).Get());
         }).Get());
     if (FAILED(hr)) {
-        MessageBoxW(g_fen, L"Le moteur WebView2 de Microsoft est introuvable.\n\nInstallez « Microsoft Edge WebView2 Runtime », puis relancez DJFFNY.exe.",
-                    L"Def Jam: Fight for NY", MB_ICONERROR);
+        MessageBoxW(g_fen, natif(0), L"Def Jam: Fight for NY", MB_ICONERROR);
         PostQuitMessage(1);
     }
 }
@@ -1175,17 +1387,26 @@ static LRESULT CALLBACK proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         DWORD code = (DWORD)wp, duree = (DWORD)lp;
         if (code && duree < 10000) {
             char b[16]; snprintf(b, sizeof b, "0x%08X", (unsigned)code);
-            toast("error", "Le jeu n'a pas pu démarrer", string("defjam_recomp.exe a quitté avec le code ") + b + ". Consultez le journal.");
+            toast("error", "launchFailed", b);
         }
         return 0;
     }
     case WM_CLOSE:
-        if (g_install_en_cours && MessageBoxW(h, L"Une installation est en cours. Quitter l'arrête.\n\nQuitter quand même ?",
-                                              L"Def Jam: Fight for NY", MB_YESNO | MB_ICONWARNING) != IDYES)
+        if (g_install_en_cours && MessageBoxW(h, natif(1), L"Def Jam: Fight for NY", MB_YESNO | MB_ICONWARNING) != IDYES)
             return 0;
         if (g_job_install) TerminateJobObject(g_job_install, 1);
         DestroyWindow(h);
         return 0;
+    case WM_RELANCER: {
+        /* le nouvel exe est en place : liberer le verrou "une seule fenetre", le lancer, partir */
+        wchar_t moi[MAX_PATH]; GetModuleFileNameW(NULL, moi, MAX_PATH);
+        wstring cmd = L"\"" + wstring(moi) + L"\" --apres-maj";
+        if (g_un) { ReleaseMutex(g_un); CloseHandle(g_un); g_un = NULL; }
+        STARTUPINFOW si = { sizeof si }; PROCESS_INFORMATION pi;
+        if (CreateProcessW(NULL, &cmd[0], NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) { CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
+        DestroyWindow(h);
+        return 0;
+    }
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(h, msg, wp, lp);
@@ -1196,13 +1417,20 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show)
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     /* une seule fenetre du lanceur a la fois */
-    HANDLE un = CreateMutexW(NULL, TRUE, L"DJFFNY_Lanceur");
+    g_apres_maj = wcsstr(GetCommandLineW(), L"--apres-maj") != NULL;
+    if (g_apres_maj) Sleep(800);              /* l'ancien lanceur finit de se fermer */
+    g_un = CreateMutexW(NULL, TRUE, L"DJFFNY_Lanceur");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND autre = FindWindowW(L"DJFFNY", NULL);
         if (autre) { ShowWindow(autre, SW_RESTORE); SetForegroundWindow(autre); }
         return 0;
     }
     g_cfg.charger();
+    g_lang = g_cfg.get("langue").empty() ? langue_windows() : g_cfg.get("langue");
+    {   /* l'exe remplace par la derniere mise a jour du lanceur */
+        wchar_t moi[MAX_PATH]; GetModuleFileNameW(NULL, moi, MAX_PATH);
+        DeleteFileW((wstring(moi) + L".ancien").c_str());
+    }
     std::thread(chercher_vs).detach();
 
     WNDCLASSEXW wc = { sizeof wc };

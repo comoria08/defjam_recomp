@@ -97,6 +97,28 @@ foreach ($f in @("README.txt", "Installer.bat")) {
 Remove-Item -Recurse -Force $racine
 Copy-Item (Join-Path $Dest "defjam_recomp\LICENSE") (Join-Path $Dest "LICENSE")
 if ($Complet) { Copy-Item -Recurse $OutilsSrc (Join-Path $Dest "outils") }
+# Le manifeste (manifest.json) : l'empreinte de chaque fichier du portage et du toolkit, celle du
+# tout (empreinte) et celle du dossier outils (paquet complet). DJFFNY.exe s'en sert pour une
+# mise a jour incrementale : il ne remplace que les fichiers changes, et ne retelecharge les
+# outils que si les leurs ont change.
+function Empreintes($dossier) {
+    $l = @()
+    Get-ChildItem $dossier -Recurse -File | Sort-Object FullName | ForEach-Object {
+        $l += , @($_.FullName.Substring($Dest.Length + 1).Replace('\', '/'), (Get-FileHash $_.FullName -Algorithm SHA256).Hash)
+    }
+    return , $l
+}
+function Somme($lignes) {
+    $b = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes(($lignes -join "`n")))
+    return ([BitConverter]::ToString($b) -replace '-', '')
+}
+$fichiers = [ordered]@{}
+foreach ($d in @("defjam_recomp", "xboxrecomp")) { foreach ($e in (Empreintes (Join-Path $Dest $d))) { $fichiers[$e[0]] = $e[1] } }
+$empreinte = Somme ($fichiers.Keys | ForEach-Object { "$_ $($fichiers[$_])" })
+$outils = if ($Complet) { Somme ((Empreintes (Join-Path $Dest "outils")) | ForEach-Object { "$($_[0]) $($_[1])" }) } else { "" }
+$manifeste = [ordered]@{ empreinte = $empreinte; outils = $outils; fichiers = $fichiers }
+[IO.File]::WriteAllText((Join-Path $Dest "manifest.json"), ($manifeste | ConvertTo-Json -Depth 3), (New-Object Text.UTF8Encoding $false))
+
 @(
     "$Nom",
     "paquet fabrique le $(Get-Date -Format 'yyyy-MM-dd HH:mm')",
